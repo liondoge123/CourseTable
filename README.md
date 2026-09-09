@@ -1,67 +1,159 @@
 # CourseTable
 
-CourseTable 是一款基于 Jetpack Compose 的 Android 课程表应用，面向需要快速查看、编辑和导入课程安排的用户。
+CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpack Compose 构建。它将课程查看、课程编辑、课表导入导出、教务系统接入和课程提醒整合在一个轻量的本地应用中。
 
-## 功能
+## 主要功能
 
-- 周视图课程表与周次切换
-- 课程新增、编辑和删除
-- 多课表管理
-- 从 Excel、PDF、ICS 和教务系统导入课程
-- ICS 导出与数据备份/恢复
-- 课程提醒
-- 深色模式与主题色设置
-- 液态玻璃风格底部导航栏
-- 底部导航支持折射、色差、拖拽挤压和弹簧回弹效果
+### 课程表
 
-## 技术栈与致谢
+- 按周查看课程安排，并支持切换周次。
+- 显示课程名称、教师、教室、时间和周次信息。
+- 支持当前周、非当前周和自定义学期设置。
+- 支持主题色、深色模式和卡片对齐方式设置。
 
-- Kotlin
+### 课程与课表管理
+
+- 新增、编辑和删除课程。
+- 支持多个独立课表，并可切换当前使用的课表。
+- 支持配置总周数、节次数量、上课时间和课程提醒。
+- 数据默认保存在设备本地，不依赖在线账号才能使用核心功能。
+
+### 导入、导出与备份
+
+- 从 Excel 文件导入课程。
+- 从 PDF 文件导入课程，并结合 OCR 识别课程表内容。
+- 导入和导出 ICS 日历文件。
+- 支持从教务系统获取课表，目前包含适配的学校/教务系统入口。
+- 支持完整备份与恢复，用于迁移设备或保存多个课表。
+
+### 提醒
+
+- 可以为课程设置课前提醒。
+- 使用 Android 系统的定时任务调度提醒，不需要应用持续运行在前台。
+
+## 液态玻璃导航栏
+
+底部导航栏采用 Backdrop 的真实背景采样渲染，并在 Android Compose 中实现了与参考项目一致的交互逻辑：
+
+- 静态状态：背景模糊、亮度/饱和度处理、镜片折射和胶囊形状。
+- 选中状态：指示镜片通过组合背景采样显示底层内容，并支持色差折射。
+- 按住和拖动：镜片会根据拖动方向产生横向拉伸和纵向挤压。
+- 快速左右移动：使用动画位置的速度驱动挤压强度，而不是简单地将单帧位移直接转换为缩放。
+- 松手后：位置、按压进度、横向缩放、纵向缩放和速度分别使用弹簧动画回到稳定状态。
+- 底栏仍使用 CourseTable 自己的尺寸（外层 54dp、镜片 48dp），没有照搬参考项目的布局尺寸。
+
+交互参数按照参考实现移植到 Compose：位置和按压使用临界阻尼弹簧，横向和纵向缩放使用欠阻尼弹簧，速度形变使用单独的欠阻尼弹簧。Android 13（API 33）及以上设备可以使用完整的 AGSL 折射效果；Android 12（API 31–32）提供模糊能力，较低版本使用兼容的静态玻璃样式。
+
+## 技术栈
+
+- Kotlin 2.4
 - Jetpack Compose
-- Room
-- DataStore
-- AndroidLiquidGlass / Backdrop
-- ML Kit Text Recognition
+- AndroidX Activity、Lifecycle、Foundation 和 Animation
+- Room：课程和课表数据存储
+- DataStore：应用设置存储
+- Backdrop：液态玻璃背景采样和渲染
+- Kyant Shapes：连续曲率胶囊形状
+- ML Kit Text Recognition：PDF/OCR 课程表识别
+- OkHttp、PDFBox、JSON 和 ICS 解析相关组件
 
-本项目的液态玻璃效果使用了以下开源项目：
+## 开源项目与致谢
 
-- [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)：提供 Backdrop 液态玻璃渲染库和 Compose 示例实现，许可证为 [Apache License 2.0](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/LICENSE)。
-- [Kyant0/Shapes](https://github.com/Kyant0/shapes)：提供 `Capsule` 等连续曲率形状，许可证为 [Apache License 2.0](https://github.com/Kyant0/shapes/blob/master/LICENSE)。
-- [martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl)：作为底部导航静态材质、拖拽挤压和弹簧回弹参数的参考，许可证为 [Apache License 2.0](https://github.com/martin65536/liquid-glass-webgl/blob/main/LICENSE)。
+本项目的液态玻璃部分使用了以下公开开源项目和参考实现：
 
-本项目使用的是上述项目的公开库、接口和参考实现；底部导航交互已针对 Android Compose 和本项目的底栏尺寸进行适配，并非直接打包 WebGL 项目。
+1. [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)
 
-## 环境要求
+   提供 Backdrop 液态玻璃渲染库，以及 Liquid Bottom Tabs、Liquid Button 等 Compose 示例实现。该仓库公开标注为 [Apache License 2.0](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/LICENSE)。
 
-- Android Studio 或兼容的 JDK 21 环境
-- Android SDK 37
-- minSdk 26
-- targetSdk 34
+2. [Kyant0/Shapes](https://github.com/Kyant0/shapes)
 
-## 构建
+   提供 `Capsule` 和其他连续曲率圆角形状，用于让玻璃边缘保持更平滑的曲率。该仓库公开标注为 [Apache License 2.0](https://github.com/Kyant0/shapes/blob/master/LICENSE)。
+
+3. [martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl)
+
+   用于对照底部标签栏的静态材质、拖拽挤压、速度驱动和弹簧回弹表现。该仓库公开标注为 [Apache License 2.0](https://github.com/martin65536/liquid-glass-webgl/blob/main/LICENSE)。
+
+本项目使用的是上述项目公开提供的依赖、接口和参考实现，并针对 Android Compose、Android 版本差异以及 CourseTable 自己的底栏尺寸进行了适配；项目运行时不包含 WebGL 页面或 WebGL 渲染器。
+
+## 项目结构
+
+```text
+CourseTable/
+├── app/src/main/java/com/coursetable/app/
+│   ├── data/                 # Room 数据模型、Repository 和设置
+│   ├── importer/             # Excel、PDF、ICS、OCR 和教务系统导入
+│   ├── reminder/             # 课程提醒调度
+│   ├── ui/                   # Compose 页面、组件和 ViewModel
+│   │   └── liquid/            # 液态玻璃宿主、表面、覆盖层和导航栏
+│   └── MainActivity.kt       # 应用入口和根导航
+├── app/src/test/              # JVM 单元测试
+├── app/src/androidTest/       # Compose/Android 仪器测试
+├── scripts/build-apk.ps1     # Preview/Release 打包脚本
+├── RELEASE.md                # 版本、产物和校验规范
+└── version.properties        # 当前版本号和 versionCode
+```
+
+## 开发环境
+
+- Android Studio，或可以运行 Android Gradle Plugin 的 IDE。
+- JDK 21/JBR 21。
+- Android SDK Platform 37。
+- Android SDK Build-Tools，且已配置 `local.properties` 或 `ANDROID_SDK_ROOT`。
+- 最低支持 Android 8.0（API 26）。
+- 目标 SDK 为 Android 14（API 34）。
+
+## 构建项目
+
+在项目根目录执行：
 
 ```powershell
-# 构建 arm64 preview 测试包
+# 构建 arm64-v8a Preview 测试包。
 .\scripts\build-apk.ps1 preview
 
-# 执行完整校验并构建正式包
+# 运行完整校验并构建正式包。
 .\scripts\build-apk.ps1 release
 ```
 
-正式构建会运行单元测试、Android 测试编译、lint、R8，并生成以下 ABI：
+Preview 构建用于快速安装测试，关闭 R8 且只生成 `arm64-v8a`。Release 构建会执行：
 
-- `arm64-v8a`
-- `armeabi-v7a`
-- `universal`
+- JVM 单元测试。
+- Android 测试代码编译。
+- Debug lint 检查。
+- Release R8 混淆和资源压缩。
+- `arm64-v8a`、`armeabi-v7a` 和 `universal` 三种 APK 构建。
+- 包名、版本、SDK、ABI、签名和 SHA-256 校验。
 
-## 下载
+构建日志位于 `app/build/logs/`，校验和文件位于对应的 `app/build/outputs/apk/{preview|release}/SHA256SUMS.txt`。
 
-正式 APK 可在 [Releases](https://github.com/liondoge123/CourseTable/releases) 页面下载。
+## 安装 APK
 
-当前版本：[v1.5.7](https://github.com/liondoge123/CourseTable/releases/tag/v1.5.7)。
+正式包可以从 [GitHub Releases](https://github.com/liondoge123/CourseTable/releases) 下载。也可以使用 ADB 安装：
+
+```powershell
+adb install -r CourseTable-v1.5.7-arm64-v8a-release.apk
+```
+
+Preview 和 Release 使用同一应用包名及签名证书，因此 Preview 可以覆盖已经安装的正式版本。
+
+## 当前版本
+
+当前正式版本为 [v1.5.7](https://github.com/liondoge123/CourseTable/releases/tag/v1.5.7)。该版本包含液态玻璃底部导航栏的折射、色差、速度挤压和弹簧回弹优化。
+
+正式 APK：
+
+- [arm64-v8a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-arm64-v8a-release.apk)
+- [armeabi-v7a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-armeabi-v7a-release.apk)
+- [universal](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-universal-release.apk)
+
+## 兼容性与限制
+
+- 完整的 AGSL 液态玻璃折射依赖 Android 13 及以上系统能力；旧版本会自动降级到可用的模糊或静态玻璃表现。
+- 不同设备的 GPU、系统渲染器和屏幕密度可能导致折射强度、色差和动画观感存在差异。
+- 教务系统导入依赖学校页面格式；页面改版后可能需要更新对应解析器。
+- PDF/OCR 导入的识别效果取决于原始文件清晰度、排版和字体。
+- 项目当前未提供云同步服务，跨设备迁移请使用备份和恢复功能。
 
 ## 许可证说明
 
-上面列出的第三方依赖均为开源项目，并按各自的 Apache License 2.0 条款使用。
+上面列出的第三方项目均公开采用 Apache License 2.0，本项目按照这些依赖各自的许可证和署名要求使用它们。
 
-CourseTable 本身当前未声明单独的开源许可证；如需再发布、二次分发或将其作为自己的应用发布，请先取得作者授权，并同时遵守第三方依赖的许可证与署名要求。
+CourseTable 本身当前未声明单独的开源许可证。未经作者授权，请勿将 CourseTable 的源码、品牌或正式 APK 作为自己的应用重新发布；重新分发时还必须继续遵守第三方依赖的许可证条款。
