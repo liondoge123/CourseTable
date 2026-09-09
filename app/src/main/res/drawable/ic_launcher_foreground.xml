@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 日历主体 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M40,34 H68 Q78,34 78,44 V72 Q78,82 68,82 H40 Q30,82 30,72 V44 Q30,34 40,34 Z" />
+
+    <!-- 装订环 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M42,26 Q45,26 45,29 V41 Q45,44 42,44 Q39,44 39,41 V29 Q39,26 42,26 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M66,26 Q69,26 69,29 V41 Q69,44 66,44 Q63,44 63,41 V29 Q63,26 66,26 Z" />
+
+    <!-- 课程色块（第一行） -->
+    <path
+        android:fillColor="#3E63DD"
+        android:pathData="M36,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#0E8A6D"
+        android:pathData="M49,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#7C5CD6"
+        android:pathData="M62,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+
+    <!-- 课程色块（第二行） -->
+    <path
+        android:fillColor="#D95D39"
+        android:pathData="M36,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#C2477F"
+        android:pathData="M49,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#157F9C"
+        android:pathData="M62,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
+</vector>
