@@ -14,8 +14,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * Native Compose port of the spring stack used by liquid-glass-webgl's bottom
- * tabs (itself a faithful port of AndroidLiquidGlass' DampedDragAnimation).
+ * Android-native adaptation of Kyant0/AndroidLiquidGlass' DampedDragAnimation.
+ * The original Compose spring stack is preserved; CourseTable adds synchronous
+ * target tracking and press-to-move support for its full-width navigation dock.
  */
 internal class DampedDragAnimation(
     private val animationScope: CoroutineScope,
@@ -38,9 +39,13 @@ internal class DampedDragAnimation(
     private val scaleYAnimation = Animatable(initialScale, 0.001f)
     private val mutatorMutex = MutatorMutex()
     private val velocityTracker = VelocityTracker()
+    // Animatable.targetValue changes only after its coroutine starts. Keep the
+    // requested target synchronously so clicks and rapid drag events never read
+    // the previous tab while Compose is already recomposing the new selection.
+    private var requestedValue = initialValue
 
     val value: Float get() = valueAnimation.value
-    val targetValue: Float get() = valueAnimation.targetValue
+    val targetValue: Float get() = requestedValue
     val pressProgress: Float get() = pressProgressAnimation.value
     val scaleX: Float get() = scaleXAnimation.value
     val scaleY: Float get() = scaleYAnimation.value
@@ -61,7 +66,7 @@ internal class DampedDragAnimation(
             if (value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
                 snapshotFlow { valueAnimation.value }
-                    .filter { abs(it - valueAnimation.targetValue) < threshold }
+                    .filter { abs(it - requestedValue) < threshold }
                     .first()
             }
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
@@ -72,6 +77,7 @@ internal class DampedDragAnimation(
 
     fun updateValue(value: Float) {
         val target = value.coerceIn(valueRange)
+        requestedValue = target
         animationScope.launch {
             launch {
                 valueAnimation.animateTo(target, valueAnimationSpec) {
@@ -81,11 +87,21 @@ internal class DampedDragAnimation(
         }
     }
 
+    /** Move the lens while keeping the current pressed state until pointer-up. */
+    fun movePressedToValue(value: Float) {
+        val target = value.coerceIn(valueRange)
+        requestedValue = target
+        animationScope.launch {
+            valueAnimation.animateTo(target, valueAnimationSpec)
+        }
+    }
+
     fun animateToValue(value: Float) {
+        val target = value.coerceIn(valueRange)
+        requestedValue = target
         animationScope.launch {
             mutatorMutex.mutate {
                 press()
-                val target = value.coerceIn(valueRange)
                 launch { valueAnimation.animateTo(target, valueAnimationSpec) }
                 if (velocity != 0f) {
                     launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }

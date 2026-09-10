@@ -264,7 +264,7 @@ fun LiquidNavigationTabs(
             Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .pointerInput(tabWidthPx, tabCount) {
+                .pointerInput(tabWidthPx, tabCount, selectedIndex) {
                     awaitEachGesture {
                         val down = awaitFirstDown(
                             requireUnconsumed = false,
@@ -272,7 +272,10 @@ fun LiquidNavigationTabs(
                         )
                         down.consume()
                         dragging = true
+                        val pressedIndex = ((down.position.x - horizontalInsetPx) / tabWidthPx)
+                            .toInt().coerceIn(0, tabCount - 1)
                         dragAnimation.press()
+                        dragAnimation.movePressedToValue(pressedIndex.toFloat())
 
                         var completed = false
                         var cancelled = false
@@ -303,11 +306,10 @@ fun LiquidNavigationTabs(
 
                         dragging = false
                         if (cancelled) {
-                            dragAnimation.release()
+                            dragAnimation.animateToValue(selectedIndex.toFloat())
                         } else {
                             val target = if (abs(totalDragX) < viewConfiguration.touchSlop) {
-                                ((down.position.x - horizontalInsetPx) / tabWidthPx)
-                                    .toInt().coerceIn(0, tabCount - 1)
+                                pressedIndex
                             } else {
                                 dragAnimation.targetValue.roundToInt().coerceIn(0, tabCount - 1)
                             }

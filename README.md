@@ -35,7 +35,7 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 
 ## 液态玻璃导航栏
 
-底部导航栏采用 Backdrop 的真实背景采样渲染，并在 Android Compose 中实现了与参考项目一致的交互逻辑：
+底部导航栏采用 Backdrop 的真实背景采样渲染，并以 AndroidLiquidGlass 的原生 Compose 实现为基准：
 
 - 静态状态：背景模糊、亮度/饱和度处理、镜片折射和胶囊形状。
 - 选中状态：指示镜片通过组合背景采样显示底层内容，并支持色差折射。
@@ -44,7 +44,7 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 - 松手后：位置、按压进度、横向缩放、纵向缩放和速度分别使用弹簧动画回到稳定状态。
 - 底栏仍使用 CourseTable 自己的尺寸（外层 54dp、镜片 48dp），没有照搬参考项目的布局尺寸。
 
-交互参数按照参考实现移植到 Compose：位置和按压使用临界阻尼弹簧，横向和纵向缩放使用欠阻尼弹簧，速度形变使用单独的欠阻尼弹簧。Android 13（API 33）及以上设备可以使用完整的 AGSL 折射效果；Android 12（API 31–32）提供模糊能力，较低版本使用兼容的静态玻璃样式。
+交互参数直接参考 AndroidLiquidGlass 的原生 `LiquidBottomTabs.kt` 与 `DampedDragAnimation.kt`：位置和按压使用临界阻尼弹簧，横向和纵向缩放使用欠阻尼弹簧，速度形变使用单独的欠阻尼弹簧。CourseTable 在此基础上保留了按下非当前标签时镜片立即移动、松手后确认页面切换的交互。Android 13（API 33）及以上设备可以使用完整的 AGSL 折射效果；Android 12（API 31–32）提供模糊能力，较低版本使用兼容的静态玻璃样式。
 
 ## 技术栈
 
@@ -60,21 +60,21 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 
 ## 开源项目与致谢
 
-本项目的液态玻璃部分使用了以下公开开源项目和参考实现：
+本项目的液态玻璃部分直接使用和适配以下 Android 原生开源项目：
 
 1. [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)
 
-   提供 Backdrop 液态玻璃渲染库，以及 Liquid Bottom Tabs、Liquid Button 等 Compose 示例实现。该仓库公开标注为 [Apache License 2.0](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/LICENSE)。
+   提供 Backdrop 液态玻璃渲染库，以及 Liquid Bottom Tabs、Liquid Button 等原生 Compose 示例。本项目的背景采样、折射、模糊、色差、内外阴影、速度挤压和弹簧动画均以这里的 Android/Compose 实现为基础。具体参考：
+
+   - [LiquidBottomTabs.kt](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/app/src/commonMain/kotlin/com/kyant/backdrop/catalog/components/LiquidBottomTabs.kt)
+   - [DampedDragAnimation.kt](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/app/src/commonMain/kotlin/com/kyant/backdrop/catalog/utils/DampedDragAnimation.kt)
+   - [Apache License 2.0](https://github.com/Kyant0/AndroidLiquidGlass/blob/kmp/LICENSE)
 
 2. [Kyant0/Shapes](https://github.com/Kyant0/shapes)
 
    提供 `Capsule` 和其他连续曲率圆角形状，用于让玻璃边缘保持更平滑的曲率。该仓库公开标注为 [Apache License 2.0](https://github.com/Kyant0/shapes/blob/master/LICENSE)。
 
-3. [martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl)
-
-   用于对照底部标签栏的静态材质、拖拽挤压、速度驱动和弹簧回弹表现。该仓库公开标注为 [Apache License 2.0](https://github.com/martin65536/liquid-glass-webgl/blob/main/LICENSE)。
-
-本项目使用的是上述项目公开提供的依赖、接口和参考实现，并针对 Android Compose、Android 版本差异以及 CourseTable 自己的底栏尺寸进行了适配；项目运行时不包含 WebGL 页面或 WebGL 渲染器。
+本项目直接使用上述 Android/Compose 项目公开提供的依赖、接口和参考实现，并针对 Android 版本差异以及 CourseTable 自己的底栏尺寸进行了适配，运行链路完全基于 Android 原生 Compose 与 AGSL。
 
 ## 项目结构
 
