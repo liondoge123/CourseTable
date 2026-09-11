@@ -290,7 +290,8 @@ private fun WeekPickerChip(
 
     LiquidCapsuleSurface(
         modifier = Modifier.height(36.dp),
-        onClick = onClick
+        onClick = onClick,
+        preferTopChromeBackdrop = true
     ) {
         Row(
             Modifier
@@ -337,7 +338,8 @@ private fun TimetableSelector(
     Box {
         LiquidCapsuleSurface(
             modifier = Modifier.height(36.dp),
-            onClick = { expanded = true }
+            onClick = { expanded = true },
+            preferTopChromeBackdrop = true
         ) {
             Row(
                 Modifier
@@ -400,7 +402,8 @@ private fun FilterCycleButton(filter: WeekFilter, onClick: () -> Unit) {
         modifier = Modifier.height(36.dp),
         onClick = onClick,
         baseColor = baseColor,
-        borderColor = borderColor
+        borderColor = borderColor,
+        preferTopChromeBackdrop = true
     ) {
         Row(
             Modifier
@@ -454,7 +457,8 @@ private fun WeekNavigationPill(
 
     LiquidCapsuleSurface(
         modifier = Modifier.height(36.dp),
-        externalPressProgress = pillPressProgress
+        externalPressProgress = pillPressProgress,
+        preferTopChromeBackdrop = true
     ) {
         Row(
             Modifier.fillMaxHeight(),
@@ -1071,11 +1075,9 @@ private fun CourseDetailDialog(
                     armed = deleteArmed,
                     onArm = { deleteArmed = true },
                     onConfirm = onDelete,
-                    compact = true
+                    compact = false
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("关闭") }
-                Spacer(Modifier.width(6.dp))
                 Button(onClick = onEdit) {
                     Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))

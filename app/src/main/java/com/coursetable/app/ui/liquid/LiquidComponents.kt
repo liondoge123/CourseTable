@@ -6,7 +6,6 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -35,7 +34,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,8 +50,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,12 +71,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.theme.LiquidTheme
+import com.kyant.shapes.Capsule
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -184,6 +182,11 @@ fun Surface(
 
 private enum class ButtonKind { Filled, Tonal, Outline, Text }
 
+internal val LiquidButtonShape = RoundedCornerShape(13.dp)
+
+internal val LocalLibraryDialogAction = staticCompositionLocalOf { false }
+internal val LocalLibraryDialogActionColor = staticCompositionLocalOf { Color.Unspecified }
+
 @Composable
 private fun LiquidButton(
     onClick: () -> Unit,
@@ -194,6 +197,8 @@ private fun LiquidButton(
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = LiquidTheme.colorScheme
+    val isLibraryDialogAction = LocalLibraryDialogAction.current && kind == ButtonKind.Text
+    val dialogActionColor = LocalLibraryDialogActionColor.current
     val baseBackground = when (kind) {
         ButtonKind.Filled -> colors.primary
         ButtonKind.Tonal -> colors.primaryContainer
@@ -205,15 +210,18 @@ private fun LiquidButton(
         enabled -> baseBackground
         else -> baseBackground.copy(alpha = 0.45f)
     }
-    val foreground = when (kind) {
+    val foreground = if (isLibraryDialogAction && dialogActionColor != Color.Unspecified) {
+        dialogActionColor
+    } else when (kind) {
         ButtonKind.Filled -> colors.onPrimary
         ButtonKind.Tonal -> colors.onPrimaryContainer
         else -> colors.primary
     }.let { if (enabled) it else it.copy(alpha = 0.55f) }
-    val shape = RoundedCornerShape(13.dp)
+    val shape = if (isLibraryDialogAction) Capsule() else LiquidButtonShape
     CompositionLocalProvider(LocalContentColor provides foreground) {
         Row(
             modifier = modifier
+                .then(if (isLibraryDialogAction) Modifier.fillMaxSize() else Modifier)
                 .defaultMinSize(minHeight = 48.dp)
                 .clip(shape)
                 .background(background)
@@ -239,7 +247,9 @@ object IconButtonDefaults { @Composable fun iconButtonColors(containerColor: Col
 fun IconButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, colors: IconButtonColors = IconButtonDefaults.iconButtonColors(), content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalContentColor provides colors.contentColor) {
         Box(
-            modifier.defaultMinSize(48.dp, 48.dp).clip(CircleShape)
+            modifier = modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .clip(CircleShape)
                 .background(colors.containerColor)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
             contentAlignment = Alignment.Center
@@ -334,29 +344,11 @@ fun RadioButton(selected: Boolean, onClick: (() -> Unit)?, modifier: Modifier = 
 
 @Composable
 fun Switch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: Modifier = Modifier) {
-    val track by animateColorAsState(if (checked) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.outlineVariant, label = "switchColor")
-    val offset by animateDpAsState(if (checked) 21.dp else 2.dp, spring(stiffness = 700f), label = "switchOffset")
-    Box(
-        modifier
-            .defaultMinSize(minWidth = 51.dp, minHeight = 48.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                enabled = onCheckedChange != null,
-                role = Role.Switch
-            ) { onCheckedChange?.invoke(!checked) },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(Modifier.size(width = 51.dp, height = 31.dp).clip(CircleShape).background(track)) {
-            Box(
-                Modifier
-                    .offset { IntOffset(offset.roundToPx(), 2.dp.roundToPx()) }
-                    .size(27.dp)
-                    .shadow(2.dp, CircleShape)
-                    .background(Color.White, CircleShape)
-            )
-        }
-    }
+    NativeLiquidToggle(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -449,5 +441,3 @@ fun FullscreenPageContainer(
         content()
     }
 }
-
-

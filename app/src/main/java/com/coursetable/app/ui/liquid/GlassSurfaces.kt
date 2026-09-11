@@ -1,18 +1,14 @@
 package com.coursetable.app.ui.liquid
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.util.lerp
@@ -27,11 +23,19 @@ import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.theme.LiquidTheme
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.Capsule
+import com.kyant.shapes.RoundedRectangle
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.tanh
 
 @Composable
 fun GlassSurface(
@@ -100,59 +104,86 @@ fun GlassSurface(
 @Composable
 internal fun OverlayGlassSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+    shape: Shape = RoundedRectangle(32.dp),
     baseColor: Color? = null,
     contentColor: Color = LiquidTheme.colorScheme.onSurface,
     shadowElevation: Dp = 20.dp,
     content: @Composable () -> Unit
 ) {
-    GlassSurface(
-        modifier = modifier.then(
-            if (baseColor != null) Modifier.background(baseColor.copy(alpha = 0.14f), shape) else Modifier
-        ),
-        shape = shape,
-        contentColor = contentColor,
-        shadowElevation = shadowElevation,
-        style = GlassStyle.OVERLAY,
-        content = content
-    )
+    val backdrop = LocalGlassBackdrop.current
+    val capability = LocalGlassCapability.current
+    val isLightTheme = !LiquidTheme.colorScheme.isDark
+    val libraryContainerColor = baseColor ?: if (isLightTheme) {
+        Color(0xFFFAFAFA).copy(alpha = 0.60f)
+    } else {
+        Color(0xFF121212).copy(alpha = 0.40f)
+    }
+
+    // Keep this material in sync with AndroidLiquidGlass' DialogContent sample.
+    val surfaceModifier = if (backdrop != null && capability != GlassCapability.STATIC) {
+        modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                colorControls(
+                    brightness = if (isLightTheme) 0.20f else 0f,
+                    saturation = 1.5f
+                )
+                blur(if (isLightTheme) 16.dp.toPx() else 8.dp.toPx())
+                if (capability == GlassCapability.FULL) {
+                    lens(
+                        refractionHeight = 24.dp.toPx(),
+                        refractionAmount = 48.dp.toPx(),
+                        depthEffect = true
+                    )
+                }
+            },
+            highlight = { Highlight.Plain },
+            onDrawSurface = { drawRect(libraryContainerColor) }
+        )
+    } else {
+        modifier
+            .shadow(shadowElevation, shape, clip = false)
+            .clip(shape)
+            .background(libraryContainerColor)
+    }
+
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        Box(surfaceModifier) { content() }
+    }
 }
 
 /**
- * Liquid glass floating capsule for top navigation and compact action bars,
- * matching the authentic liquid glass materials of the bottom navigation dock.
- * Features:
- * - Authentic Backdrop lens refraction (lens + vibrancy + blur + chromatic aberration)
- * - Smooth physics-based spring press scaling (matching bottom dock items)
- * - Deepening lens curvature and specular highlight on press
- * - Resilient fallback for static environments
+ * Android-native top control based on AndroidLiquidGlass' LiquidButton.
+ * CourseTable keeps its own dimensions and optional selected-state tint.
  */
 @Composable
 fun LiquidCapsuleSurface(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
-    shape: Shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    shape: Shape = Capsule(),
     baseColor: Color? = null,
     borderColor: Color? = null,
     contentColor: Color = LiquidTheme.colorScheme.onSurface,
     shadowElevation: Dp = 3.dp,
     externalPressProgress: Float? = null,
+    preferTopChromeBackdrop: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val backdrop = LocalTopChromeGlassBackdrop.current ?: LocalGlassBackdrop.current
+    val ambientBackdrop = LocalGlassBackdrop.current
+    val backdrop = if (preferTopChromeBackdrop) {
+        LocalTopChromeGlassBackdrop.current ?: ambientBackdrop
+    } else {
+        ambientBackdrop
+    }
     val capability = LocalGlassCapability.current
     val colors = LiquidTheme.colorScheme
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val internalPressProgress by animateFloatAsState(
-        targetValue = if (isPressed && enabled) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 360f),
-        label = "capsulePress"
-    )
-    val pressProgress = externalPressProgress ?: internalPressProgress
-    val scale = lerp(1f, 1.05f, pressProgress)
-    val borderStroke = BorderStroke(0.8.dp, borderColor ?: colors.glassBorder)
+    val animationScope = rememberCoroutineScope()
+    val interactiveHighlight = remember(animationScope) {
+        InteractiveGlassHighlight(animationScope)
+    }
+    val pressProgress = externalPressProgress ?: interactiveHighlight.pressProgress
     val glassEnabled = backdrop != null && capability != GlassCapability.STATIC
     val containerColor = if (colors.isDark) {
         Color(0xFF121212).copy(alpha = 0.40f)
@@ -160,41 +191,66 @@ fun LiquidCapsuleSurface(
         Color(0xFFFAFAFA).copy(alpha = 0.40f)
     }
 
-    val baseModifier = modifier.then(
-        if (baseColor != null) Modifier.background(baseColor, shape) else Modifier
-    )
-
     val surfaceModifier = if (glassEnabled) {
-        baseModifier
+        modifier
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
                     vibrancy()
-                    blur(8.dp.toPx())
+                    blur(2.dp.toPx())
                     lens(
-                        refractionHeight = 24.dp.toPx(),
+                        refractionHeight = 12.dp.toPx(),
                         refractionAmount = 24.dp.toPx()
                     )
                 },
                 layerBlock = {
-                    scaleX = scale
-                    scaleY = scale
+                    val scale = lerp(1f, 1f + 4.dp.toPx() / size.height, pressProgress)
+                    if (onClick != null && enabled && externalPressProgress == null) {
+                        val width = size.width
+                        val height = size.height
+                        val maxOffset = size.minDimension
+                        val offset = interactiveHighlight.offset
+                        translationX = maxOffset * tanh(0.05f * offset.x / maxOffset)
+                        translationY = maxOffset * tanh(0.05f * offset.y / maxOffset)
+                        val maxDragScale = 4.dp.toPx() / size.height
+                        val offsetAngle = atan2(offset.y, offset.x)
+                        scaleX = scale +
+                            maxDragScale * abs(cos(offsetAngle) * offset.x / size.maxDimension) *
+                            (width / height).coerceAtMost(1f)
+                        scaleY = scale +
+                            maxDragScale * abs(sin(offsetAngle) * offset.y / size.maxDimension) *
+                            (height / width).coerceAtMost(1f)
+                    } else {
+                        scaleX = scale
+                        scaleY = scale
+                    }
                 },
                 onDrawSurface = {
-                    drawRect(containerColor)
+                    if (baseColor != null) drawRect(baseColor)
                 }
             )
-            .border(borderStroke, shape)
+            .then(if (onClick != null && enabled) interactiveHighlight.modifier else Modifier)
+            .then(
+                if (borderColor != null) {
+                    Modifier.border(BorderStroke(0.8.dp, borderColor), shape)
+                } else Modifier
+            )
     } else {
-        baseModifier
+        modifier
             .graphicsLayer {
+                val scale = lerp(1f, 1f + 4.dp.toPx() / size.height, pressProgress)
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(shadowElevation, shape, clip = false)
             .clip(shape)
-            .background(containerColor, shape)
-            .border(borderStroke, shape)
+            .background(baseColor ?: containerColor, shape)
+            .then(
+                if (borderColor != null) {
+                    Modifier.border(BorderStroke(0.8.dp, borderColor), shape)
+                } else Modifier
+            )
     }
 
     CompositionLocalProvider(LocalContentColor provides contentColor) {
@@ -204,11 +260,12 @@ fun LiquidCapsuleSurface(
                     Modifier
                         .clip(shape)
                         .clickable(
-                            interactionSource = interactionSource,
+                            interactionSource = null,
                             indication = null,
                             enabled = enabled,
                             onClick = onClick
                         )
+                        .then(if (enabled) interactiveHighlight.gestureModifier else Modifier)
                 } else Modifier
             ),
             contentAlignment = Alignment.Center

@@ -77,8 +77,7 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     onAtBottomChanged: (Boolean) -> Unit = {},
-    onSubpageChanged: (Boolean) -> Unit = {},
-    onImport: (ImportEntry) -> Unit = {}
+    onSubpageChanged: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val appVersionName = remember(context) {
@@ -351,7 +350,7 @@ fun SettingsScreen(
                         onClick = { ReminderScheduler.openChannelSettings(context) }
                     )
                     PermRow(
-                        icon = Icons.Filled.PlayCircle,
+                        icon = Icons.Filled.AutoStart,
                         title = "自启动",
                         status = "请确认 →",
                         ok = false,
@@ -470,48 +469,76 @@ fun SettingsScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "更多",
+                "设置",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "导入、课表管理与应用偏好",
+                "课程安排、提醒、外观与数据",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        SettingsGroup(title = "导入") {
-            SettingItem(
-                icon = Icons.Filled.CloudDownload,
-                title = "从教务系统导入",
-                subtitle = "登录学校教务系统并获取课表",
-                onClick = { onImport(ImportEntry.EDU) }
-            )
-            SettingItem(
-                icon = Icons.Filled.IosShare,
-                title = "从文件导入",
-                subtitle = "支持 ICS、Excel、CSV、PDF 与图片",
-                onClick = { onImport(ImportEntry.FILE) }
-            )
-            SettingItem(
-                icon = Icons.Filled.Save,
-                title = "从备份恢复",
-                subtitle = "恢复 CourseTable JSON 备份",
-                onClick = { onImport(ImportEntry.BACKUP) }
-            )
-        }
-
-        SettingsGroup(title = "课表与学期") {
+        SettingsGroup(title = "学期与课表") {
             SettingItem(
                 icon = Icons.Filled.CalendarMonth,
                 title = "课表管理",
                 subtitle = "当前：${settings.timetableName} · 共 ${timetables.size} 个课表",
                 onClick = { showTimetableManage = true }
             )
+            SettingItem(
+                icon = Icons.Filled.DateRange,
+                title = "学期开始日期",
+                subtitle = settings.semesterStart.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                onClick = { showDatePicker = true }
+            )
+            StepperItem(
+                icon = Icons.Filled.ViewWeek,
+                title = "学期总周数",
+                value = "${settings.totalWeeks} 周",
+                onDecrease = {
+                    scope.launch { settingsRepo.save(totalWeeks = (settings.totalWeeks - 1).coerceAtLeast(1)) }
+                },
+                onIncrease = {
+                    scope.launch { settingsRepo.save(totalWeeks = (settings.totalWeeks + 1).coerceAtMost(30)) }
+                }
+            )
+            SettingItem(
+                icon = Icons.Filled.Schedule,
+                title = "节次时间",
+                subtitle = "共 ${settings.periods.size} 节 · " +
+                    "${settings.periods.firstOrNull()?.start?.toString()?.substring(0, 5) ?: "--:--"} - " +
+                    "${settings.periods.lastOrNull()?.end?.toString()?.substring(0, 5) ?: "--:--"}",
+                onClick = {
+                    editorPeriods = settings.periods
+                    showPeriodsEditor = true
+                }
+            )
         }
 
-        SettingsGroup(title = "提醒") {
+        SettingsGroup(title = "课程显示") {
+            AlignItem(
+                alignLeft = settings.cardAlignLeft,
+                onChange = { scope.launch { settingsRepo.save(cardAlignLeft = it) } }
+            )
+            SettingItem(
+                icon = Icons.Filled.Visibility,
+                title = "显示非本周课程",
+                subtitle = "关闭后只显示当前周的课程",
+                onClick = {
+                    scope.launch { settingsRepo.save(showNonCurrentWeek = !settings.showNonCurrentWeek) }
+                },
+                trailing = {
+                    Switch(
+                        checked = settings.showNonCurrentWeek,
+                        onCheckedChange = { scope.launch { settingsRepo.save(showNonCurrentWeek = it) } }
+                    )
+                }
+            )
+        }
+
+        SettingsGroup(title = "提醒与权限") {
             SettingItem(
                 icon = Icons.Filled.Notifications,
                 title = "课前提醒",
@@ -618,59 +645,7 @@ fun SettingsScreen(
             )
         }
 
-        SettingsGroup(title = "学期") {
-            SettingItem(
-                icon = Icons.Filled.DateRange,
-                title = "学期开始日期",
-                subtitle = settings.semesterStart.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                onClick = { showDatePicker = true }
-            )
-            StepperItem(
-                icon = Icons.Filled.ViewWeek,
-                title = "学期总周数",
-                value = "${settings.totalWeeks} 周",
-                onDecrease = {
-                    scope.launch { settingsRepo.save(totalWeeks = (settings.totalWeeks - 1).coerceAtLeast(1)) }
-                },
-                onIncrease = {
-                    scope.launch { settingsRepo.save(totalWeeks = (settings.totalWeeks + 1).coerceAtMost(30)) }
-                }
-            )
-            SettingItem(
-                icon = Icons.Filled.Schedule,
-                title = "节次时间",
-                subtitle = "共 ${settings.periods.size} 节 · " +
-                    "${settings.periods.firstOrNull()?.start?.toString()?.substring(0, 5) ?: "--:--"} - " +
-                    "${settings.periods.lastOrNull()?.end?.toString()?.substring(0, 5) ?: "--:--"}",
-                onClick = {
-                    editorPeriods = settings.periods
-                    showPeriodsEditor = true
-                }
-            )
-        }
-
-        SettingsGroup(title = "课表显示") {
-            AlignItem(
-                alignLeft = settings.cardAlignLeft,
-                onChange = { scope.launch { settingsRepo.save(cardAlignLeft = it) } }
-            )
-            SettingItem(
-                icon = Icons.Filled.ViewWeek,
-                title = "显示非本周课程",
-                subtitle = "关闭后只显示当前周的课程",
-                onClick = {
-                    scope.launch { settingsRepo.save(showNonCurrentWeek = !settings.showNonCurrentWeek) }
-                },
-                trailing = {
-                    Switch(
-                        checked = settings.showNonCurrentWeek,
-                        onCheckedChange = { scope.launch { settingsRepo.save(showNonCurrentWeek = it) } }
-                    )
-                }
-            )
-        }
-
-        SettingsGroup(title = "数据") {
+        SettingsGroup(title = "数据与安全") {
             SettingItem(
                 icon = Icons.Filled.Save,
                 title = "导出备份文件",
@@ -698,9 +673,9 @@ fun SettingsScreen(
 
         SettingsGroup(title = "关于") {
             SettingItem(
-                icon = Icons.Filled.BookOpen,
+                icon = Icons.Filled.Info,
                 title = "CourseTable $appVersionName",
-                subtitle = "Liquid Glass 界面由 AndroidLiquidGlass / Backdrop 2.0.1 驱动\nBackdrop © Kyant，Apache License 2.0"
+                subtitle = "Liquid Glass 界面由 AndroidLiquidGlass / Backdrop 2.0.1 驱动\nBackdrop © Kyant · Apache 2.0；Lucide Icons 1.45.0 · ISC"
             )
         }
     }

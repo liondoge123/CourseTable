@@ -20,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -73,6 +74,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.theme.LiquidTheme
+import com.kyant.shapes.Capsule
+import com.kyant.shapes.RoundedRectangle
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -107,7 +110,7 @@ fun rememberModalBottomSheetState(skipPartiallyExpanded: Boolean = true) =
 fun ModalBottomSheet(
     onDismissRequest: () -> Unit,
     sheetState: LiquidSheetState = rememberModalBottomSheetState(),
-    containerColor: Color = LiquidTheme.colorScheme.glass,
+    containerColor: Color = Color.Unspecified,
     content: @Composable () -> Unit
 ) {
     var drag by remember { mutableFloatStateOf(0f) }
@@ -119,7 +122,7 @@ fun ModalBottomSheet(
     val scrimVisibility = remember {
         MutableTransitionState(false).apply { targetState = true }
     }
-    val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    val sheetShape = RoundedRectangle(32.dp)
 
     fun dismissAnimated(afterAction: (() -> Unit)? = null) {
         if (!dismissRequested) {
@@ -197,7 +200,7 @@ fun ModalBottomSheet(
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = if (LiquidTheme.colorScheme.isDark) 0.38f else 0.20f))
+                            .background(libraryOverlayDimColor())
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -219,8 +222,8 @@ fun ModalBottomSheet(
                 ) {
                     OverlayGlassSurface(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .widthIn(max = 720.dp)
+                            .fillMaxWidth()
                             .navigationBarsPadding()
                             .imePadding()
                             .offset { IntOffset(0, drag.coerceAtLeast(0f).roundToInt()) }
@@ -231,7 +234,7 @@ fun ModalBottomSheet(
                                 onClick = {}
                             ),
                         shape = sheetShape,
-                        baseColor = containerColor,
+                        baseColor = containerColor.takeUnless { it == Color.Unspecified },
                         shadowElevation = 24.dp
                     ) {
                         Column(Modifier.fillMaxWidth()) {
@@ -324,7 +327,7 @@ fun AlertDialog(
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = if (LiquidTheme.colorScheme.isDark) 0.38f else 0.20f))
+                            .background(libraryOverlayDimColor())
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -350,32 +353,33 @@ fun AlertDialog(
                 ) {
                     OverlayGlassSurface(
                         modifier = Modifier
+                            .widthIn(max = 480.dp)
                             .fillMaxWidth()
-                            .widthIn(max = 420.dp)
                             .imePadding()
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                                 onClick = {}
                             ),
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedRectangle(32.dp),
                         shadowElevation = 24.dp
                     ) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column {
                             if (title != null) {
-                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurface) { title() }
+                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurface) {
+                                    Box(Modifier.padding(start = 28.dp, top = 24.dp, end = 28.dp, bottom = 12.dp)) {
+                                        title()
+                                    }
+                                }
                             }
                             if (text != null) {
-                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurfaceVariant) { text() }
+                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurfaceVariant) {
+                                    Box(Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
+                                        text()
+                                    }
+                                }
                             }
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                dismissButton?.invoke()
-                                confirmButton()
-                            }
+                            LibraryDialogActions(dismissButton, confirmButton)
                         }
                     }
                 }
@@ -667,7 +671,7 @@ fun NumberWheelPickerDialog(
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = if (LiquidTheme.colorScheme.isDark) 0.38f else 0.20f))
+                            .background(libraryOverlayDimColor())
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -693,32 +697,35 @@ fun NumberWheelPickerDialog(
                 ) {
                     OverlayGlassSurface(
                         modifier = Modifier
-                            .width(280.dp)
+                            .widthIn(max = 480.dp)
+                            .fillMaxWidth()
                             .imePadding()
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                                 onClick = {}
                             ),
-                        shape = RoundedCornerShape(22.dp),
+                        shape = RoundedRectangle(32.dp),
                         shadowElevation = 24.dp
                     ) {
-                        Column(
-                            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Column {
                             Text(
                                 text = title,
                                 style = LiquidTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = LiquidTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                                modifier = Modifier.padding(
+                                    start = 28.dp,
+                                    top = 24.dp,
+                                    end = 28.dp,
+                                    bottom = 12.dp
+                                )
                             )
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
+                                    .padding(horizontal = 24.dp, vertical = 12.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 WheelColumn(
@@ -730,24 +737,23 @@ fun NumberWheelPickerDialog(
                                 )
                             }
 
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(onClick = { dismissAnimated() }) {
-                                    Text("取消", color = LiquidTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                TextButton(onClick = {
-                                    dismissAnimated {
-                                        onConfirm(tempValue)
-                                        onDismiss()
+                            LibraryDialogActions(
+                                dismissButton = {
+                                    TextButton(onClick = { dismissAnimated() }) {
+                                        Text("取消")
                                     }
-                                }) {
-                                    Text("确定", color = LiquidTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        dismissAnimated {
+                                            onConfirm(tempValue)
+                                            onDismiss()
+                                        }
+                                    }) {
+                                        Text("确定", fontWeight = FontWeight.SemiBold)
+                                    }
                                 }
-                            }
+                            )
                         }
                     }
                 }
@@ -780,7 +786,7 @@ fun DropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Comp
                         indication = null,
                         onClick = {}
                     ),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedRectangle(24.dp),
                 shadowElevation = 16.dp
             ) {
                 Column(
@@ -790,6 +796,67 @@ fun DropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Comp
                         .padding(vertical = 4.dp)
                 ) { content() }
             }
+        }
+    }
+}
+
+@Composable
+private fun libraryOverlayDimColor(): Color = if (LiquidTheme.colorScheme.isDark) {
+    Color(0xFF121212).copy(alpha = 0.56f)
+} else {
+    Color(0xFF29293A).copy(alpha = 0.23f)
+}
+
+@Composable
+private fun LibraryDialogActions(
+    dismissButton: (@Composable () -> Unit)?,
+    confirmButton: @Composable () -> Unit
+) {
+    val isLightTheme = !LiquidTheme.colorScheme.isDark
+    val contentColor = LiquidTheme.colorScheme.onSurface
+    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val containerColor = if (isLightTheme) {
+        Color(0xFFFAFAFA).copy(alpha = 0.20f)
+    } else {
+        Color(0xFF121212).copy(alpha = 0.20f)
+    }
+
+    Row(
+        Modifier
+            .padding(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 24.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (dismissButton != null) {
+            Box(
+                Modifier
+                    .clip(Capsule())
+                    .background(containerColor)
+                    .height(48.dp)
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                CompositionLocalProvider(
+                    LocalLibraryDialogAction provides true,
+                    LocalLibraryDialogActionColor provides contentColor,
+                    content = dismissButton
+                )
+            }
+        }
+        Box(
+            Modifier
+                .clip(Capsule())
+                .background(accentColor)
+                .height(48.dp)
+                .weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            CompositionLocalProvider(
+                LocalLibraryDialogAction provides true,
+                LocalLibraryDialogActionColor provides Color.White,
+                content = confirmButton
+            )
         }
     }
 }

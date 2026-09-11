@@ -1,12 +1,14 @@
 package com.coursetable.app.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -110,6 +112,13 @@ fun CourseTableTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
+    val colorScheme = if (dark) themeColor.darkScheme else themeColor.lightScheme
+    val rippleIndication = remember(colorScheme.onSurface, dark) {
+        liquidRipple(
+            color = colorScheme.onSurface,
+            rippleAlpha = if (dark) DarkLiquidRippleAlpha else LightLiquidRippleAlpha
+        )
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -121,9 +130,10 @@ fun CourseTableTheme(
         }
     }
     CompositionLocalProvider(
-        LocalColors provides if (dark) themeColor.darkScheme else themeColor.lightScheme,
+        LocalColors provides colorScheme,
         LocalTypography provides AppTypography,
         LocalShapes provides AppShapes,
+        LocalIndication provides rippleIndication,
         content = content
     )
 }

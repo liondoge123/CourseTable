@@ -34,10 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.coursetable.app.ui.theme.LiquidTheme
@@ -68,9 +73,18 @@ fun LiquidNavigationTabs(
     onSelected: (Int) -> Unit,
     tabCount: Int,
     modifier: Modifier = Modifier,
+    selectableIndices: List<Int> = List(tabCount) { it },
+    actionIndex: Int? = null,
+    onAction: (() -> Unit)? = null,
+    actionContentDescription: String? = null,
     content: @Composable RowScope.(contentColor: Color, itemScale: Float, selectTab: (Int) -> Unit) -> Unit
 ) {
     require(tabCount > 0)
+    require(selectableIndices.isNotEmpty())
+    require(selectedIndex in selectableIndices)
+    require(selectableIndices.all { it in 0 until tabCount })
+    require(actionIndex == null || actionIndex in 0 until tabCount)
+    require((actionIndex == null) == (onAction == null))
     val backdrop = LocalNavigationGlassBackdrop.current ?: LocalGlassBackdrop.current
     val capability = LocalGlassCapability.current
     val colors = LiquidTheme.colorScheme
@@ -80,6 +94,7 @@ fun LiquidNavigationTabs(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val offsetAnimation = remember { Animatable(0f) }
+    val actionInteractionSource = remember { MutableInteractionSource() }
     val dragAnimation = remember(scope, tabCount) {
         DampedDragAnimation(
             animationScope = scope,
@@ -107,8 +122,14 @@ fun LiquidNavigationTabs(
 
     val selectTab: (Int) -> Unit = { requestedIndex ->
         val index = requestedIndex.coerceIn(0, tabCount - 1)
-        dragAnimation.animateToValue(index.toFloat())
-        onSelected(index)
+        if (index in selectableIndices) {
+            dragAnimation.animateToValue(index.toFloat())
+            onSelected(index)
+        }
+    }
+
+    fun nearestSelectableIndex(value: Float): Int = selectableIndices.minBy { index ->
+        abs(index - value)
     }
 
     BoxWithConstraints(modifier, contentAlignment = Alignment.CenterStart) {
@@ -313,8 +334,9 @@ fun LiquidNavigationTabs(
                             } else {
                                 dragAnimation.targetValue.roundToInt().coerceIn(0, tabCount - 1)
                             }
-                            dragAnimation.animateToValue(target.toFloat())
-                            onSelected(target)
+                            val selectableTarget = nearestSelectableIndex(target.toFloat())
+                            dragAnimation.animateToValue(selectableTarget.toFloat())
+                            onSelected(selectableTarget)
                         }
                         scope.launch {
                             offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
@@ -322,6 +344,30 @@ fun LiquidNavigationTabs(
                     }
                 }
         )
+
+        if (actionIndex != null && onAction != null) {
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 3.dp)
+                    .graphicsLayer {
+                        translationX = actionIndex * tabWidthPx + panelOffset
+                    }
+                    .height(54.dp)
+                    .fillMaxWidth(1f / tabCount)
+                    .semantics {
+                        role = Role.Button
+                        if (actionContentDescription != null) {
+                            contentDescription = actionContentDescription
+                        }
+                    }
+                    .clickable(
+                        interactionSource = actionInteractionSource,
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onAction
+                    )
+            )
+        }
     }
 }
 
@@ -331,6 +377,8 @@ fun LiquidGlassIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     contentColor: Color = LiquidTheme.colorScheme.primary,
+    shape: Shape = CircleShape,
+    containerColor: Color? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val backdrop = LocalNavigationGlassBackdrop.current ?: LocalGlassBackdrop.current
@@ -347,7 +395,7 @@ fun LiquidGlassIconButton(
     val surfaceModifier = if (glassEnabled) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
-            shape = { CircleShape },
+            shape = { shape },
             effects = {
                 vibrancy()
                 blur(2.dp.toPx())
@@ -361,10 +409,12 @@ fun LiquidGlassIconButton(
                 scaleX = scale
                 scaleY = scale
             },
-            // The official LiquidButton leaves the surface untinted by default;
-            // the refracted page and edge highlight form the glass material.
-            onDrawSurface = { }
-        ).border(BorderStroke(0.8.dp, colors.glassBorder), CircleShape)
+            // Keep the official material untinted by default; callers may add a
+            // translucent accent surface without changing the optical effects.
+            onDrawSurface = {
+                if (containerColor != null) drawRect(containerColor)
+            }
+        ).border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     } else {
         Modifier
             .graphicsLayer {
@@ -373,11 +423,11 @@ fun LiquidGlassIconButton(
                 scaleY = scale
             }
             .background(
-                if (colors.isDark) Color(0xFF121212).copy(alpha = 0.40f)
+                containerColor ?: if (colors.isDark) Color(0xFF121212).copy(alpha = 0.40f)
                 else Color(0xFFFAFAFA).copy(alpha = 0.40f),
-                CircleShape
+                shape
             )
-            .border(BorderStroke(0.8.dp, colors.glassBorder), CircleShape)
+            .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     }
 
     CompositionLocalProvider(LocalContentColor provides contentColor) {

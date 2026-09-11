@@ -4,8 +4,6 @@ import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -85,7 +83,6 @@ import com.coursetable.app.ui.liquid.GlassStyle
 import com.coursetable.app.ui.liquid.Icon
 import com.coursetable.app.ui.liquid.LiquidAmbientBackground
 import com.coursetable.app.ui.liquid.LiquidBackdropHost
-import com.coursetable.app.ui.liquid.LiquidGlassIconButton
 import com.coursetable.app.ui.liquid.LiquidNavigationTabs
 import com.coursetable.app.ui.liquid.Surface
 import com.coursetable.app.ui.liquid.Text
@@ -100,7 +97,7 @@ import java.time.LocalDate
 
 private val FloatingDockInset = 88.dp
 private val FloatingDockHeight = 54.dp
-private val FloatingActionSize = 50.dp
+private val DockActionHeight = 36.dp
 
 class MainActivity : ComponentActivity() {
 
@@ -160,31 +157,17 @@ private fun MainScreen(
     val courses by vm.courses.collectAsState()
     var destination by rememberSaveable { mutableStateOf(RootDestination.TIMETABLE) }
     var activeImport by rememberSaveable { mutableStateOf<ImportEntry?>(null) }
-    var pickedIncoming by remember { mutableStateOf<IncomingFile?>(null) }
     var nestedPageOpen by remember { mutableStateOf(false) }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
-    val importFilePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            pickedIncoming = IncomingFile(uri, context.contentResolver.getType(uri))
-            activeImport = ImportEntry.INCOMING
-        }
-    }
-
-    fun openImportPicker(entry: ImportEntry) {
-        val mimeType = if (entry == ImportEntry.BACKUP) "application/json" else "*/*"
-        importFilePicker.launch(mimeType)
-    }
-
     LaunchedEffect(incoming) {
         if (incoming != null) {
-            destination = RootDestination.MORE
+            destination = RootDestination.IMPORT
             activeImport = ImportEntry.INCOMING
         }
     }
 
     BackHandler(enabled = activeImport != null) {
-        pickedIncoming = null
         activeImport = null
     }
 
@@ -216,13 +199,12 @@ private fun MainScreen(
                 ) { hasImport ->
                     if (hasImport) {
                         ImportScreen(
-                            incoming = pickedIncoming ?: incoming,
+                            incoming = incoming,
                             onConsumed = {
-                                if (pickedIncoming != null) pickedIncoming = null else onIncomingConsumed()
+                                onIncomingConsumed()
                             },
                             initialEntry = activeImport ?: ImportEntry.HUB,
                             onBack = {
-                                pickedIncoming = null
                                 activeImport = null
                             }
                         )
@@ -259,15 +241,13 @@ private fun MainScreen(
                                     rootMode = true,
                                     bottomContentPadding = FloatingDockInset
                                 )
-                                RootDestination.MORE -> SettingsScreen(
+                                RootDestination.IMPORT -> ImportScreen(
                                     bottomContentPadding = FloatingDockInset,
-                                    onSubpageChanged = { nestedPageOpen = it },
-                                    onImport = { entry ->
-                                        when (entry) {
-                                            ImportEntry.FILE, ImportEntry.BACKUP -> openImportPicker(entry)
-                                            else -> activeImport = entry
-                                        }
-                                    }
+                                    onSubpageChanged = { nestedPageOpen = it }
+                                )
+                                RootDestination.SETTINGS -> SettingsScreen(
+                                    bottomContentPadding = FloatingDockInset,
+                                    onSubpageChanged = { nestedPageOpen = it }
                                 )
                             }
                         }
@@ -289,8 +269,6 @@ private fun MainScreen(
             ) + fadeOut(animationSpec = tween(180)),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            val actionIcon = if (destination == RootDestination.MORE) Icons.Filled.CloudDownload else Icons.Filled.Add
-            val actionDescription = if (destination == RootDestination.MORE) "打开导入" else "添加课程"
             FloatingNavigationDock(
                 selectedTab = destination,
                 onTabSelected = {
@@ -298,14 +276,13 @@ private fun MainScreen(
                     destination = it
                 },
                 onActionClick = {
-                    when (destination) {
-                        RootDestination.TIMETABLE -> vm.openCellEditor(LocalDate.now().dayOfWeek.value, 1)
-                        RootDestination.COURSES -> vm.openCellEditor(1, 1)
-                        RootDestination.MORE -> activeImport = ImportEntry.HUB
+                    val day = if (destination == RootDestination.TIMETABLE) {
+                        LocalDate.now().dayOfWeek.value
+                    } else {
+                        1
                     }
-                },
-                actionIcon = actionIcon,
-                actionDescription = actionDescription
+                    vm.openCellEditor(day, 1)
+                }
             )
         }
 
@@ -328,30 +305,40 @@ private fun FloatingNavigationDock(
     selectedTab: RootDestination,
     onTabSelected: (RootDestination) -> Unit,
     onActionClick: () -> Unit,
-    actionIcon: ImageVector,
-    actionDescription: String,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Box(
         modifier = modifier
-            .widthIn(max = 350.dp)
+            .widthIn(max = 460.dp)
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 14.dp, top = 6.dp, end = 14.dp, bottom = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 20.dp)
     ) {
-        val destinations = listOf(
-            RootDestination.TIMETABLE,
-            RootDestination.COURSES,
-            RootDestination.MORE
-        )
+        val selectedIndex = when (selectedTab) {
+            RootDestination.TIMETABLE -> 0
+            RootDestination.COURSES -> 1
+            RootDestination.IMPORT -> 3
+            RootDestination.SETTINGS -> 4
+        }
         LiquidNavigationTabs(
-            selectedIndex = destinations.indexOf(selectedTab).coerceAtLeast(0),
-            onSelected = { index -> onTabSelected(destinations[index]) },
-            tabCount = destinations.size,
+            selectedIndex = selectedIndex,
+            onSelected = { index ->
+                val destination = when (index) {
+                    0 -> RootDestination.TIMETABLE
+                    1 -> RootDestination.COURSES
+                    3 -> RootDestination.IMPORT
+                    4 -> RootDestination.SETTINGS
+                    else -> null
+                }
+                destination?.let(onTabSelected)
+            },
+            tabCount = 5,
+            selectableIndices = listOf(0, 1, 3, 4),
+            actionIndex = 2,
+            onAction = onActionClick,
+            actionContentDescription = "添加课程",
             modifier = Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 .height(FloatingDockHeight)
         ) { contentColor, itemScale, selectTab ->
             DockItem(
@@ -370,28 +357,53 @@ private fun FloatingNavigationDock(
                 contentColor = contentColor,
                 itemScale = itemScale
             )
+            DockActionVisual(itemScale = itemScale)
             DockItem(
-                selected = selectedTab == RootDestination.MORE,
-                onClick = { selectTab(2) },
-                icon = Icons.Filled.MoreHorizontal,
-                label = "更多",
+                selected = selectedTab == RootDestination.IMPORT,
+                onClick = { selectTab(3) },
+                icon = Icons.Filled.CloudDownload,
+                label = "导入",
+                contentColor = contentColor,
+                itemScale = itemScale
+            )
+            DockItem(
+                selected = selectedTab == RootDestination.SETTINGS,
+                onClick = { selectTab(4) },
+                icon = Icons.Filled.Settings,
+                label = "设置",
                 contentColor = contentColor,
                 itemScale = itemScale
             )
         }
+    }
+}
 
-        val actionContent = LiquidTheme.colorScheme.primary
-
-        LiquidGlassIconButton(
-            onClick = onActionClick,
-            modifier = Modifier.size(FloatingActionSize),
-            contentColor = actionContent,
+@Composable
+private fun RowScope.DockActionVisual(itemScale: Float) {
+    val actionContainerColor = LiquidTheme.colorScheme.primary.copy(alpha = 0.78f)
+    val actionContentColor = LiquidTheme.colorScheme.onPrimary
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .graphicsLayer {
+                scaleX = itemScale
+                scaleY = itemScale
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 56.dp, height = DockActionHeight)
+                .clip(RoundedCornerShape(18.dp))
+                .background(actionContainerColor),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = actionIcon,
-                contentDescription = actionDescription,
-                tint = actionContent,
-                modifier = Modifier.size(25.dp)
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = actionContentColor,
+                modifier = Modifier.size(20.dp)
             )
         }
     }

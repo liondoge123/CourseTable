@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.coursetable.app.CourseApp
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
@@ -106,7 +107,9 @@ fun ImportScreen(
     incoming: IncomingFile? = null,
     onConsumed: () -> Unit = {},
     initialEntry: ImportEntry = ImportEntry.HUB,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    bottomContentPadding: Dp = 0.dp,
+    onSubpageChanged: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as CourseApp }
@@ -130,6 +133,10 @@ fun ImportScreen(
     var editingCourse by remember { mutableStateOf<Course?>(null) }
     var showEduImport by remember(initialEntry) { mutableStateOf(initialEntry == ImportEntry.EDU) }
     var entryHandled by remember(initialEntry) { mutableStateOf(false) }
+
+    LaunchedEffect(showEduImport) {
+        onSubpageChanged(showEduImport)
+    }
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -291,6 +298,7 @@ fun ImportScreen(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
+                        .padding(bottom = bottomContentPadding)
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
@@ -315,10 +323,9 @@ fun ImportScreen(
                 }
 
                 ImportCard(
-                    icon = Icons.Filled.CloudDownload,
+                    icon = Icons.Filled.School,
                     title = "从教务系统导入",
                     subtitle = "登录学校教务系统并自动获取课表",
-                    primary = true,
                     enabled = !busy,
                     onClick = {
                         overwriteMode = false
@@ -327,7 +334,7 @@ fun ImportScreen(
                 )
 
                 ImportCard(
-                    icon = Icons.Filled.Refresh,
+                    icon = Icons.Filled.FileImport,
                     title = "从文件导入",
                     subtitle = "支持 ICS、Excel、CSV、PDF 与图片",
                     enabled = !busy,
@@ -338,7 +345,7 @@ fun ImportScreen(
                 )
 
                 ImportCard(
-                    icon = Icons.Filled.Save,
+                    icon = Icons.Filled.Restore,
                     title = "从备份恢复",
                     subtitle = "恢复本应用导出的 JSON 课表备份",
                     enabled = !busy,
@@ -481,20 +488,17 @@ private fun ImportCard(
     title: String,
     subtitle: String,
     enabled: Boolean,
-    primary: Boolean = false,
     onClick: () -> Unit
 ) {
+    val shape = MaterialTheme.shapes.medium
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(shape)
             .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(
-            1.dp,
-            if (primary) MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
-            else MaterialTheme.colorScheme.outlineVariant
-        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {

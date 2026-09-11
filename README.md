@@ -33,9 +33,9 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 - 可以为课程设置课前提醒。
 - 使用 Android 系统的定时任务调度提醒，不需要应用持续运行在前台。
 
-## 液态玻璃导航栏
+## 液态玻璃导航与交互
 
-底部导航栏采用 Backdrop 的真实背景采样渲染，并以 AndroidLiquidGlass 的原生 Compose 实现为基准：
+底部导航栏采用“课表 / 课程 / 添加 / 导入 / 设置”五槽结构。中央“+”是全局添加课程动作，其余四项是可拖动切换的根页面。导航采用 Backdrop 的真实背景采样渲染，并以 AndroidLiquidGlass 的原生 Compose 实现为基准：
 
 - 静态状态：背景模糊、亮度/饱和度处理、镜片折射和胶囊形状。
 - 选中状态：指示镜片通过组合背景采样显示底层内容，并支持色差折射。
@@ -43,6 +43,7 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 - 快速左右移动：使用动画位置的速度驱动挤压强度，而不是简单地将单帧位移直接转换为缩放。
 - 松手后：位置、按压进度、横向缩放、纵向缩放和速度分别使用弹簧动画回到稳定状态。
 - 底栏仍使用 CourseTable 自己的尺寸（外层 54dp、镜片 48dp），没有照搬参考项目的布局尺寸。
+- 设置开关、弹窗表面、触点波纹和顶栏胶囊也使用统一的 Liquid 交互反馈。
 
 交互参数直接参考 AndroidLiquidGlass 的原生 `LiquidBottomTabs.kt` 与 `DampedDragAnimation.kt`：位置和按压使用临界阻尼弹簧，横向和纵向缩放使用欠阻尼弹簧，速度形变使用单独的欠阻尼弹簧。CourseTable 在此基础上保留了按下非当前标签时镜片立即移动、松手后确认页面切换的交互。Android 13（API 33）及以上设备可以使用完整的 AGSL 折射效果；Android 12（API 31–32）提供模糊能力，较低版本使用兼容的静态玻璃样式。
 
@@ -55,12 +56,13 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 - DataStore：应用设置存储
 - Backdrop：液态玻璃背景采样和渲染
 - Kyant Shapes：连续曲率胶囊形状
+- Lucide Icons：统一的 24×24 线性 SVG 图标
 - ML Kit Text Recognition：PDF/OCR 课程表识别
 - OkHttp、PDFBox、JSON 和 ICS 解析相关组件
 
 ## 开源项目与致谢
 
-本项目的液态玻璃部分直接使用和适配以下 Android 原生开源项目：
+本项目使用和适配以下开源项目与视觉资源：
 
 1. [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)
 
@@ -74,7 +76,11 @@ CourseTable 是一款面向 Android 的课程表应用，使用 Kotlin 和 Jetpa
 
    提供 `Capsule` 和其他连续曲率圆角形状，用于让玻璃边缘保持更平滑的曲率。该仓库公开标注为 [Apache License 2.0](https://github.com/Kyant0/shapes/blob/master/LICENSE)。
 
-本项目直接使用上述 Android/Compose 项目公开提供的依赖、接口和参考实现，并针对 Android 版本差异以及 CourseTable 自己的底栏尺寸进行了适配，运行链路完全基于 Android 原生 Compose 与 AGSL。
+3. [Lucide Icons](https://lucide.dev/)
+
+   应用内通用操作、导航与状态图标取自 Lucide 1.45.0 官方 SVG，统一采用 24×24 网格、2px 圆端线性样式，并遵循 [ISC License](app/src/main/assets/licenses/lucide-icons.txt)。
+
+本项目使用上述开源项目公开提供的依赖、接口、参考实现与视觉资源，并针对 Android 版本差异以及 CourseTable 自己的界面尺寸进行了适配。
 
 ## 项目结构
 
@@ -131,20 +137,21 @@ Preview 构建用于快速安装测试，关闭 R8 且只生成 `arm64-v8a`。Re
 正式包可以从 [GitHub Releases](https://github.com/liondoge123/CourseTable/releases) 下载。也可以使用 ADB 安装：
 
 ```powershell
-adb install -r CourseTable-v1.5.7-arm64-v8a-release.apk
+adb install -r CourseTable-v1.5.8-arm64-v8a-release.apk
 ```
 
 Preview 和 Release 使用同一应用包名及签名证书，因此 Preview 可以覆盖已经安装的正式版本。
 
 ## 当前版本
 
-当前正式版本为 [v1.5.7](https://github.com/liondoge123/CourseTable/releases/tag/v1.5.7)。该版本包含液态玻璃底部导航栏的折射、色差、速度挤压和弹簧回弹优化。
+当前正式版本为 [v1.5.8](https://github.com/liondoge123/CourseTable/releases/tag/v1.5.8)（versionCode 91）。该版本加入五槽根导航、独立导入页、Liquid Toggle、弹窗与触点反馈优化，并将应用图标体系统一迁移到 Lucide Icons 1.45.0。
 
 正式 APK：
 
-- [arm64-v8a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-arm64-v8a-release.apk)
-- [armeabi-v7a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-armeabi-v7a-release.apk)
-- [universal](https://github.com/liondoge123/CourseTable/releases/download/v1.5.7/CourseTable-v1.5.7-universal-release.apk)
+- [arm64-v8a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.8/CourseTable-v1.5.8-arm64-v8a-release.apk) — `b89d806511b039a9f7f0596cd98b2e30b8fc2f22f5b3c3540d618a4eaeff2941`
+- [armeabi-v7a](https://github.com/liondoge123/CourseTable/releases/download/v1.5.8/CourseTable-v1.5.8-armeabi-v7a-release.apk) — `809adce12b5e24a0835c2218ad3648cfa44c9921a44b4182fae9fa2c47615995`
+- [universal](https://github.com/liondoge123/CourseTable/releases/download/v1.5.8/CourseTable-v1.5.8-universal-release.apk) — `0ee5c8d2d0ec06e9e4e43a902d241f9e717441ca4426493f22f60675273637a0`
+- [SHA256SUMS.txt](https://github.com/liondoge123/CourseTable/releases/download/v1.5.8/SHA256SUMS.txt)
 
 ## 兼容性与限制
 
@@ -158,4 +165,4 @@ Preview 和 Release 使用同一应用包名及签名证书，因此 Preview 可
 
 CourseTable 现以 [Apache License 2.0](LICENSE) 开源。你可以按照许可证条款使用、修改和再分发本项目，但需要保留许可证和相关署名，并遵守第三方依赖各自的许可证要求。
 
-上面列出的第三方项目均公开采用 Apache License 2.0。本项目的名称、图标和品牌标识不代表授予第三方商标或品牌使用权。
+上面列出的第三方项目分别采用 Apache License 2.0 或 ISC License。本项目的名称和品牌标识不代表授予第三方商标或品牌使用权。

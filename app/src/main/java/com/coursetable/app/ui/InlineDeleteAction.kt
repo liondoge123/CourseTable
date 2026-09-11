@@ -7,11 +7,16 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -20,14 +25,15 @@ import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.Icon
 import com.coursetable.app.ui.liquid.IconButton
 import com.coursetable.app.ui.liquid.IconButtonDefaults
+import com.coursetable.app.ui.liquid.LiquidButtonShape
+import com.coursetable.app.ui.liquid.Surface
 import com.coursetable.app.ui.liquid.Text
-import com.coursetable.app.ui.liquid.TextButton
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 
 /**
  * 行内删除操作：
- * - compact = true：严格固定 40dp × 40dp 尺寸，点击后在淡红背景中平滑切换为红色对勾 (✓)，绝不膨胀变形挤压左侧排版；
- * - compact = false：保留底部操作栏等开阔区域的文字按钮形态。
+ * - compact = true：固定 40dp × 40dp；确认状态使用红底白色垃圾桶，不挤压列表排版；
+ * - compact = false：固定 112dp × 48dp，以“垃圾桶 + 文字”呈现完整的删除语义。
  */
 @Composable
 fun InlineDeleteAction(
@@ -36,28 +42,18 @@ fun InlineDeleteAction(
     onConfirm: () -> Unit,
     compact: Boolean = false
 ) {
-    if (compact) {
-        val backgroundColor by animateColorAsState(
-            targetValue = if (armed) {
-                MaterialTheme.colorScheme.error.copy(
-                    alpha = if (MaterialTheme.colorScheme.isDark) 0.28f else 0.16f
-                )
-            } else {
-                Color.Transparent
-            },
-            animationSpec = tween(180),
-            label = "DeleteActionBg"
-        )
-        val iconTint by animateColorAsState(
-            targetValue = if (armed) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-            },
-            animationSpec = tween(180),
-            label = "DeleteActionTint"
-        )
+    val backgroundColor by animateColorAsState(
+        targetValue = if (armed) MaterialTheme.colorScheme.error else Color.Transparent,
+        animationSpec = tween(180),
+        label = "DeleteActionBg"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (armed) Color.White else MaterialTheme.colorScheme.error,
+        animationSpec = tween(180),
+        label = "DeleteActionContent"
+    )
 
+    if (compact) {
         IconButton(
             onClick = if (armed) onConfirm else onArm,
             modifier = Modifier
@@ -66,48 +62,53 @@ fun InlineDeleteAction(
                 .background(backgroundColor),
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = Color.Transparent,
-                contentColor = iconTint
+                contentColor = contentColor
             )
         ) {
-            AnimatedContent(
-                targetState = armed,
-                transitionSpec = {
-                    fadeIn(tween(160)) togetherWith fadeOut(tween(140))
-                },
-                label = "DeleteActionIcon"
-            ) { isArmed ->
-                if (isArmed) {
-                    Icon(
-                        Icons.Filled.Check,
-                        contentDescription = "确认删除",
-                        modifier = Modifier.size(18.dp),
-                        tint = iconTint
-                    )
-                } else {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = "删除",
-                        modifier = Modifier.size(18.dp),
-                        tint = iconTint
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = if (armed) "确认删除" else "删除",
+                modifier = Modifier.size(18.dp),
+                tint = contentColor
+            )
+        }
+    } else {
+        Surface(
+            onClick = if (armed) onConfirm else onArm,
+            modifier = Modifier
+                .width(112.dp)
+                .height(48.dp),
+            shape = LiquidButtonShape,
+            color = backgroundColor,
+            contentColor = contentColor
+        ) {
+            Row(
+                modifier = Modifier
+                    .width(112.dp)
+                    .height(48.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = contentColor
+                )
+                Spacer(Modifier.width(6.dp))
+                AnimatedContent(
+                    targetState = armed,
+                    transitionSpec = {
+                        fadeIn(tween(160)) togetherWith fadeOut(tween(140))
+                    },
+                    label = "DeleteActionLabel"
+                ) { isArmed ->
+                    Text(
+                        if (isArmed) "确认删除" else "删除",
+                        color = contentColor
                     )
                 }
             }
-        }
-    } else {
-        TextButton(
-            onClick = if (armed) onConfirm else onArm,
-            contentPadding = PaddingValues(horizontal = 8.dp)
-        ) {
-            Icon(
-                if (armed) Icons.Filled.Check else Icons.Filled.Delete,
-                contentDescription = if (armed) "确认删除" else "删除",
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.error
-            )
-            Text(
-                if (armed) "确认删除" else "删除",
-                color = MaterialTheme.colorScheme.error
-            )
         }
     }
 }
