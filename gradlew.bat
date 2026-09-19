@@ -35,6 +35,13 @@ set APP_HOME=%DIRNAME%
 @rem Resolve any "." and ".." in APP_HOME to make it shorter.
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
+@rem Keep Windows build temporary files and Java local sockets inside the project.
+set "TEMP=%APP_HOME%\.gradle\tmp"
+set "TMP=%TEMP%"
+if not exist "%TEMP%" mkdir "%TEMP%"
+if not exist "%TEMP%" goto fail
+set JAVA_TOOL_OPTIONS=%JAVA_TOOL_OPTIONS% "-Djava.io.tmpdir=%TEMP%" "-Djdk.net.unixdomain.tmpdir=%TEMP%"
+
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 

@@ -50,7 +50,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.CourseApp
-import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.PeriodUtils
 import com.coursetable.app.importer.BackupManager
@@ -93,10 +92,14 @@ fun SettingsScreen(
     val timetableRepo = remember { app.timetableRepository }
     val scope = rememberCoroutineScope()
 
-    val settingsState = remember(settingsRepo) {
-        settingsRepo.settings.stateIn(scope, SharingStarted.WhileSubscribed(5000), AppSettings())
+    // Do not render switches from AppSettings defaults while DataStore is loading.
+    // Otherwise an enabled switch is first drawn off and then animates on whenever
+    // this screen is opened.
+    val loadedSettings by settingsRepo.settings.collectAsState(initial = null)
+    val settings = loadedSettings ?: run {
+        Box(Modifier.fillMaxSize())
+        return
     }
-    val settings by settingsState.collectAsState()
 
     val coursesState = remember(courseRepo) {
         courseRepo.observeAll().stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())

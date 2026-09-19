@@ -1,4 +1,6 @@
 .gradle/
+.cache/
+__pycache__/
 .kotlin/
 build/
 *.apk

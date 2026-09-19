@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -59,21 +63,30 @@ fun CourseEditorDialog(
     totalWeeks: Int,
     periodCount: Int,
     onDismiss: () -> Unit,
-    onSave: (Course) -> Unit
+    onSave: (Course) -> Unit,
+    title: String? = null,
+    sourceContent: (@Composable () -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    showColorPicker: Boolean = true,
+    pinSourceContent: Boolean = false,
+    embedded: Boolean = false,
+    saveLabel: String? = null,
+    protectEdits: Boolean = false,
+    reviewHints: List<String> = emptyList()
 ) {
-    var name by remember { mutableStateOf(course.name) }
-    var teacher by remember { mutableStateOf(course.teacher) }
-    var location by remember { mutableStateOf(course.location) }
-    var day by remember { mutableStateOf(course.dayOfWeek.coerceIn(1, 7)) }
-    var startSection by remember { mutableStateOf(course.startSection.coerceIn(1, periodCount)) }
-    var duration by remember { mutableStateOf(course.duration.coerceIn(1, 4)) }
-    var weekType by remember { mutableStateOf(WeekType.from(course.weekType)) }
-    var startWeek by remember { mutableStateOf(course.startWeek.coerceIn(1, totalWeeks)) }
-    var endWeek by remember { mutableStateOf(course.endWeek.coerceIn(startWeek, totalWeeks)) }
-    var color by remember { mutableStateOf(course.color) }
+    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.name) }
+    var teacher by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.teacher) }
+    var location by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.location) }
+    var day by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.dayOfWeek.coerceIn(1, 7)) }
+    var startSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.startSection.coerceIn(1, periodCount)) }
+    var duration by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.duration.coerceIn(1, (periodCount - course.startSection.coerceIn(1, periodCount) + 1).coerceAtLeast(1))) }
+    var weekType by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(WeekType.from(course.weekType)) }
+    var startWeek by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.startWeek.coerceIn(1, totalWeeks)) }
+    var endWeek by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.endWeek.coerceIn(startWeek, totalWeeks)) }
+    var color by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.color) }
     var saving by remember { mutableStateOf(false) }
 
-    val maxDuration = (periodCount - startSection + 1).coerceAtLeast(1).coerceIn(1, 4)
+    val maxDuration = (periodCount - startSection + 1).coerceAtLeast(1)
 
     fun save() {
         val trimmed = name.trim()
@@ -95,14 +108,22 @@ fun CourseEditorDialog(
         )
     }
 
-    ModalBottomSheet(
-        onDismissRequest = { if (!saving) onDismiss() },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ) {
+    var discardChanges by remember { mutableStateOf(false) }
+    val changed = name != course.name || teacher != course.teacher || location != course.location ||
+        day != course.dayOfWeek || startSection != course.startSection || duration != course.duration ||
+        startWeek != course.startWeek || endWeek != course.endWeek || weekType.code != course.weekType || color != course.color
+    fun requestDismiss() { if (!saving) { if (protectEdits && changed) discardChanges = true else onDismiss() } }
+    androidx.activity.compose.BackHandler(embedded) { requestDismiss() }
+    if (discardChanges) AlertDialog(onDismissRequest = { discardChanges = false }, title = { Text("保存校对修改？") },
+        text = { Text("当前课程有尚未保存的修改。") },
+        confirmButton = { TextButton(onClick = { discardChanges = false; save() }, enabled = name.isNotBlank()) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("放弃修改") } })
+    val editorContent: @Composable () -> Unit = {
         Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.94f)
+                .testTag("course-editor-page")
+                .fillMaxHeight(if (embedded) 1f else 0.94f)
                 .navigationBarsPadding()
                 .imePadding()
         ) {
@@ -114,9 +135,8 @@ fun CourseEditorDialog(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
-                val dismissController = LocalDialogDismissController.current
                 IconButton(
-                    onClick = { dismissController?.dismiss { onDismiss() } ?: onDismiss() },
+                    onClick = { requestDismiss() },
                     enabled = !saving,
                     modifier = Modifier
                         .size(40.dp)
@@ -130,7 +150,7 @@ fun CourseEditorDialog(
                 }
 
                 Text(
-                    text = if (course.id == 0L) "添加课程" else "编辑课程",
+                    text = title ?: if (course.id == 0L) "添加课程" else "编辑课程",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -160,17 +180,26 @@ fun CourseEditorDialog(
                 }
             }
 
+            if (pinSourceContent && sourceContent != null) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("course-editor-pinned-source")) {
+                    sourceContent()
+                }
+            }
+
             // 表单滚动内容
             Column(
                 Modifier
                     .weight(1f)
+                    .testTag("course-editor-form")
                     .clipToBounds()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 顶部 1:1 动态效果预览
-                CourseCardPreview(
+                // Import review replaces the live preview while sharing the entire editor.
+                if (sourceContent != null) {
+                    if (!pinSourceContent) sourceContent()
+                } else CourseCardPreview(
                     name = name,
                     teacher = teacher,
                     location = location,
@@ -185,6 +214,7 @@ fun CourseEditorDialog(
 
                 // 模块 1: 基本信息
                 EditorSectionCard(icon = "📝", title = "基本信息") {
+                    reviewHints.filter { "名称" in it }.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -215,6 +245,7 @@ fun CourseEditorDialog(
 
                 // 模块 2: 上课时间
                 EditorSectionCard(icon = "⏰", title = "上课时间") {
+                    reviewHints.filter { "星期" in it || "节次" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     Text(
                         text = "星期",
                         style = MaterialTheme.typography.labelMedium,
@@ -242,7 +273,7 @@ fun CourseEditorDialog(
                             formatter = { "第 $it 节" }
                         ) { newSec ->
                             startSection = newSec
-                            duration = duration.coerceIn(1, (periodCount - newSec + 1).coerceAtLeast(1).coerceIn(1, 4))
+                            duration = duration.coerceIn(1, (periodCount - newSec + 1).coerceAtLeast(1))
                         }
                         NumberPickerField(
                             label = "节数时长",
@@ -255,6 +286,7 @@ fun CourseEditorDialog(
 
                 // 模块 3: 周次范围
                 EditorSectionCard(icon = "📅", title = "周次范围") {
+                    reviewHints.filter { "周次" in it || "单双周" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     Text(
                         text = "单双周规则",
                         style = MaterialTheme.typography.labelMedium,
@@ -293,7 +325,7 @@ fun CourseEditorDialog(
                 }
 
                 // 模块 4: 课程颜色
-                EditorSectionCard(icon = "🎨", title = "课程颜色") {
+                if (showColorPicker) EditorSectionCard(icon = "🎨", title = "课程颜色") {
                     val paletteItems = remember {
                         CourseColorPalette.map { c ->
                             Triple(c, c.toArgbLong(), c.luminance() > 0.55f)
@@ -335,9 +367,26 @@ fun CourseEditorDialog(
                     }
                 }
 
+                if (onDelete != null && saveLabel == null) TextButton(onClick = onDelete, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
                 Spacer(Modifier.height(24.dp))
             }
+            if (saveLabel != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onDelete != null) TextButton(onClick = onDelete, enabled = !saving) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                Button(onClick = ::save, enabled = canSave, modifier = Modifier.weight(1f)) { Text(saveLabel) }
+            }
         }
+    }
+    if (embedded) editorContent() else {
+        val density = LocalDensity.current
+        val imeVisible = WindowInsets.ime.getBottom(density) > 0
+        ModalBottomSheet(
+            onDismissRequest = { requestDismiss() },
+            canDismiss = { if (protectEdits && changed) { requestDismiss(); false } else !saving },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            shape = RoundedCornerShape(if (imeVisible) 0.dp else 32.dp)
+        ) { editorContent() }
     }
 }
 
@@ -351,30 +400,20 @@ private fun EditorSectionCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    FormSectionCard(modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(icon, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            content()
+            Text(icon, style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
+        content()
     }
 }
 

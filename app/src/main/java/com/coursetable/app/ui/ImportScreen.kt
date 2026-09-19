@@ -33,11 +33,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,9 +55,15 @@ import com.coursetable.app.importer.BackupManager
 import com.coursetable.app.importer.ExcelTimetableImporter
 import com.coursetable.app.importer.IcsImporter
 import com.coursetable.app.importer.IcsParser
-import com.coursetable.app.importer.ImageTimetableOcr
 import com.coursetable.app.importer.PdfParseResult
-import com.coursetable.app.importer.UnifiedPdfImporter
+import com.coursetable.app.importer.VisualTimetableImporter
+import com.coursetable.app.importer.VisualImportSession
+import com.coursetable.app.importer.PreparedImportImage
+import com.coursetable.app.importer.ImageSelection
+import com.coursetable.app.importer.ImageImportPreparation
+import com.coursetable.app.importer.fieldErrors
+import com.coursetable.app.importer.reviewIssues
+import kotlinx.coroutines.CancellationException
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.CourseColorPalette
@@ -69,6 +77,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private val WEEKDAY_NAMES2 = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+/** Close a completed result if cancellation prevents ownership reaching Compose. */
+private suspend fun <T : java.io.Closeable> loadImportResource(producer: suspend () -> T): T {
+    var resource: T? = null
+    try {
+        return withContext(Dispatchers.IO) { producer().also { resource = it } }
+    } catch (e: Throwable) {
+        resource?.close()
+        throw e
+    }
+}
 
 data class IncomingFile(val uri: Uri, val mimeType: String?) {
     companion object {
@@ -96,10 +115,38 @@ private val EXCEL_MIMES = setOf(
     "text/comma-separated-values"
 )
 
-private sealed class ImportPreview {
+internal sealed class ImportPreview {
     data class Ics(val courses: List<Course>, val warnings: List<String>) : ImportPreview()
     data class Backup(val data: BackupData) : ImportPreview()
     data class Pdf(val result: PdfParseResult, val sourceLabel: String = "PDF 课表") : ImportPreview()
+}
+
+internal class ImportFlowState : androidx.lifecycle.ViewModel() {
+    val busy = mutableStateOf(false)
+    val pendingPreview = mutableStateOf<ImportPreview?>(null)
+    val overwriteMode = mutableStateOf(false)
+    val previewPath = mutableStateOf<String?>(null)
+    val reviewCandidates = mutableStateOf<List<CandidateCourse>>(emptyList())
+    val candidatesEdited = mutableStateOf(false)
+    val visualSession = mutableStateOf<VisualImportSession?>(null)
+    val preparedImage = mutableStateOf<PreparedImportImage?>(null)
+    val autoRecognizing = mutableStateOf(false)
+    val choosingImage = mutableStateOf(false)
+    val imageSelection = mutableStateOf(ImageSelection())
+    val selectionError = mutableStateOf<String?>(null)
+    val reviewDirty = mutableStateOf(false)
+    val completed = mutableStateOf(false)
+    fun clearDraft() {
+        visualSession.value?.close(); visualSession.value = null
+        preparedImage.value?.close(); preparedImage.value = null
+        pendingPreview.value = null
+        reviewCandidates.value = emptyList()
+        reviewDirty.value = false
+    }
+    override fun onCleared() {
+        visualSession.value?.close()
+        preparedImage.value?.close()
+    }
 }
 
 @Composable
@@ -109,33 +156,45 @@ fun ImportScreen(
     initialEntry: ImportEntry = ImportEntry.HUB,
     onBack: (() -> Unit)? = null,
     bottomContentPadding: Dp = 0.dp,
-    onSubpageChanged: (Boolean) -> Unit = {}
+    onSubpageChanged: (Boolean) -> Unit = {},
+    onImported: () -> Unit = {},
+    recognizeImage: suspend (android.content.Context, PreparedImportImage, ImageSelection, AppSettings) -> VisualImportSession = ImageImportPreparation::recognize
 ) {
     val context = LocalContext.current
     val app = remember(context) { context.applicationContext as CourseApp }
     val repo = remember { app.courseRepository }
     val settingsRepo = remember { app.settingsRepository }
     val timetableRepo = remember { app.timetableRepository }
-    val scope = rememberCoroutineScope()
+    val flowState: ImportFlowState = androidx.lifecycle.viewmodel.compose.viewModel()
+    val scope = flowState.viewModelScope
 
     val settingsState = remember(settingsRepo) {
         settingsRepo.settings.stateIn(scope, SharingStarted.WhileSubscribed(5000), AppSettings())
     }
     val settings by settingsState.collectAsState()
 
-    var busy by remember { mutableStateOf(false) }
-    var pendingPreview by remember { mutableStateOf<ImportPreview?>(null) }
-    var overwriteMode by remember { mutableStateOf(false) }
-    var previewPath by remember { mutableStateOf<String?>(null) }
-    var reviewCandidates by remember { mutableStateOf<List<CandidateCourse>>(emptyList()) }
-    var candidatesEdited by remember { mutableStateOf(false) }
-    var editingCandidateIndex by remember { mutableStateOf(-1) }
-    var editingCourse by remember { mutableStateOf<Course?>(null) }
-    var showEduImport by remember(initialEntry) { mutableStateOf(initialEntry == ImportEntry.EDU) }
-    var entryHandled by remember(initialEntry) { mutableStateOf(false) }
+    LaunchedEffect(flowState.completed.value) {
+        if (flowState.completed.value) { flowState.completed.value = false; onImported() }
+    }
+    var busy by flowState.busy
+    var pendingPreview by flowState.pendingPreview
+    var overwriteMode by flowState.overwriteMode
+    var previewPath by flowState.previewPath
+    var reviewCandidates by flowState.reviewCandidates
+    var candidatesEdited by flowState.candidatesEdited
+    var visualSession by flowState.visualSession
+    var preparedImage by flowState.preparedImage
+    var autoRecognizing by flowState.autoRecognizing
+    var choosingImage by flowState.choosingImage
+    var imageSelection by flowState.imageSelection
+    var selectionError by flowState.selectionError
+    var reviewDirty by flowState.reviewDirty
+    var showEduImport by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(initialEntry == ImportEntry.EDU) }
+    var entryHandled by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(false) }
 
-    LaunchedEffect(showEduImport) {
-        onSubpageChanged(showEduImport)
+    val imagePreviewOpen = pendingPreview != null && pendingPreview !is ImportPreview.Backup && !choosingImage
+    LaunchedEffect(showEduImport, imagePreviewOpen) {
+        onSubpageChanged(showEduImport || imagePreviewOpen)
     }
 
     fun toast(msg: String) {
@@ -143,6 +202,11 @@ fun ImportScreen(
     }
 
     suspend fun handleUri(uri: Uri, mimeType: String?) {
+        if (busy || autoRecognizing || choosingImage || pendingPreview != null) {
+            toast("请先完成或取消当前导入")
+            return
+        }
+        reviewDirty = false
         val mime = mimeType ?: context.contentResolver.getType(uri)
         val path = uri.lastPathSegment.orEmpty().lowercase()
         busy = true
@@ -158,6 +222,7 @@ fun ImportScreen(
                             toast("没有找到可导入的课程日程（${parsed.warnings.joinToString("；").ifBlank { "格式不受支持" }}）")
                         } else {
                             val outcome = IcsImporter.convert(parsed.events, settings)
+                            reviewCandidates = outcome.courses.map { courseToCandidate(it).copy(draftId = java.util.UUID.randomUUID().toString()) }
                             pendingPreview = ImportPreview.Ics(outcome.courses, parsed.warnings + outcome.warnings)
                             overwriteMode = false
                         }
@@ -178,35 +243,23 @@ fun ImportScreen(
                     }
                 }
                 mime == "application/pdf" || path.endsWith(".pdf") -> {
-                    val (result, pathName, warn) = withContext(Dispatchers.IO) {
-                        UnifiedPdfImporter.importPdf(context, uri)
+                    val session = loadImportResource {
+                        VisualTimetableImporter.open(context, uri, true, settings)
                     }
-                    if (result.candidates.isEmpty()) {
-                        toast(warn.joinToString("\n").ifBlank { "未能从 PDF 中识别出课程" })
-                    } else {
-                        reviewCandidates = result.candidates
-                        candidatesEdited = false
-                        pendingPreview = ImportPreview.Pdf(result)
-                        previewPath = if (pathName == "text") "文字层直读" else "OCR 识别"
-                        overwriteMode = false
-                    }
+                    visualSession = session
+                    reviewCandidates = session.result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
+                    candidatesEdited = true
+                    pendingPreview = ImportPreview.Pdf(session.result)
+                    previewPath = session.path
+                    overwriteMode = false
                 }
                 mime?.startsWith("image/") == true || path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") -> {
-                    val image = withContext(Dispatchers.IO) { decodeScaled(context, uri) }
-                    if (image == null) {
-                        toast("无法读取图片")
-                    } else {
-                        val result = withContext(Dispatchers.IO) { ImageTimetableOcr.parseImage(image) }
-                        if (result.candidates.isEmpty()) {
-                            toast(result.warnings.joinToString("\n").ifBlank { "未能从图片中识别出课程" })
-                        } else {
-                            reviewCandidates = result.candidates
-                            candidatesEdited = false
-                            pendingPreview = ImportPreview.Pdf(result)
-                            previewPath = "OCR 识别"
-                            overwriteMode = false
-                        }
-                    }
+                    preparedImage = loadImportResource { ImageImportPreparation.prepare(context, uri) }
+                    imageSelection = ImageSelection()
+                    selectionError = null
+                    autoRecognizing = true
+                    reviewDirty = false
+                    overwriteMode = false
                 }
                 mime in EXCEL_MIMES || path.endsWith(".csv") || path.endsWith(".xlsx") || path.endsWith(".xls") -> {
                     val bytes = withContext(Dispatchers.IO) {
@@ -225,7 +278,7 @@ fun ImportScreen(
                         if (result.candidates.isEmpty()) {
                             toast(result.warnings.joinToString("\n").ifBlank { "未能从表格中识别出课程" })
                         } else {
-                            reviewCandidates = result.candidates
+                            reviewCandidates = result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
                             candidatesEdited = false
                             pendingPreview = ImportPreview.Pdf(result, "Excel/CSV 表格")
                             previewPath = "表格解析"
@@ -235,11 +288,41 @@ fun ImportScreen(
                 }
                 else -> toast("不支持的文件类型")
             }
+        } catch (t: CancellationException) {
+            throw t
         } catch (t: Throwable) {
+            android.util.Log.e("CourseTableImport", "Import failed", t)
             toast("读取失败：${t.javaClass.simpleName} ${t.message}")
         } finally {
             busy = false
         }
+    }
+
+    suspend fun recognizePrepared(image: PreparedImportImage) {
+        busy = true
+        selectionError = null
+        try {
+            val session = loadImportResource { recognizeImage(context, image, imageSelection, settings) }
+            if (session.result.candidates.isEmpty()) {
+                session.close()
+                selectionError = "未识别到课程，请重试或调整范围，保留星期和节次表头"
+            } else {
+                visualSession?.takeIf { it.directory != session.directory }?.close()
+                visualSession = session
+                reviewCandidates = session.result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
+                candidatesEdited = true
+                reviewDirty = false
+                pendingPreview = ImportPreview.Pdf(session.result, "图片课表")
+                previewPath = session.path
+                choosingImage = false
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { selectionError = "识别失败：${e.message ?: "请重试"}" }
+        finally { busy = false; autoRecognizing = false }
+    }
+
+    LaunchedEffect(preparedImage, autoRecognizing) {
+        if (autoRecognizing) preparedImage?.let { recognizePrepared(it) }
     }
 
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -262,12 +345,12 @@ fun ImportScreen(
         val inc = incoming ?: return@LaunchedEffect
         handleUri(inc.uri, inc.mimeType)
         onConsumed()
-        if (initialEntry == ImportEntry.INCOMING && pendingPreview == null) {
+        if (initialEntry == ImportEntry.INCOMING && pendingPreview == null && preparedImage == null) {
             onBack?.invoke()
         }
     }
 
-    AnimatedContent(
+    if (!imagePreviewOpen) AnimatedContent(
         targetState = showEduImport,
         transitionSpec = fullscreenSubpageTransitionSpec(),
         label = "ImportToEduImport"
@@ -280,7 +363,7 @@ fun ImportScreen(
             EduImportScreen(
                 semesterStart = settings.semesterStart,
                 onDone = { result, sourceLabel ->
-                    reviewCandidates = result.candidates
+                    reviewCandidates = result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
                     candidatesEdited = false
                     pendingPreview = ImportPreview.Pdf(result, sourceLabel)
                     previewPath = "教务系统"
@@ -367,119 +450,99 @@ fun ImportScreen(
         }
     }
 
-    pendingPreview?.let { preview ->
-        ImportPreviewDialog(
-            preview = preview,
-            overwrite = overwriteMode,
-            pdfCandidates = reviewCandidates,
-            onPdfEdit = { index ->
-                if (preview is ImportPreview.Pdf && index in reviewCandidates.indices) {
-                    val c = reviewCandidates[index]
-                    editingCandidateIndex = index
-                    editingCourse = candidateToCourse(c, settings.timetableId)
+    if (preparedImage != null && !choosingImage && pendingPreview == null && (autoRecognizing || selectionError != null)) {
+        if (busy || autoRecognizing) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = {},
+                properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+            ) {
+                Surface(Modifier.fillMaxWidth().testTag("image-recognition-progress"), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.background) {
+                    Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        CircularProgressIndicator(Modifier.size(28.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("正在识别课表…", style = MaterialTheme.typography.titleMedium)
+                            Text("完成后自动显示预览", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
-            },
-            onPdfDelete = { index ->
-                if (index in reviewCandidates.indices) {
-                    reviewCandidates = reviewCandidates.filterIndexed { i, _ -> i != index }
-                    candidatesEdited = true
-                }
-            },
-            onOverwriteChange = { overwriteMode = it },
+            }
+        } else AlertDialog(
+            onDismissRequest = { if (!busy) { preparedImage = null; selectionError = null } },
+            title = { Text(if (busy || autoRecognizing) "正在识别课表…" else "未能识别课表") },
+            text = { Text(selectionError ?: "识别完成后将直接显示导入确认清单") },
+            confirmButton = { if (!busy && !autoRecognizing) TextButton(onClick = { autoRecognizing = true }) { Text("重试") } },
+            dismissButton = { if (!busy && !autoRecognizing) Row {
+                TextButton(onClick = { choosingImage = true }) { Text("调整范围") }
+                TextButton(onClick = { preparedImage = null; selectionError = null; openFile.launch("image/*") }) { Text("换图") }
+            } }
+        )
+    }
+
+    if (choosingImage) preparedImage?.let { image ->
+        ImportImageSelection(
+            image = image, selection = imageSelection, onSelection = { imageSelection = it },
+            busy = busy, error = selectionError,
             onDismiss = {
-                pendingPreview = null
-                if (initialEntry == ImportEntry.INCOMING) onBack?.invoke()
+                choosingImage = false
+                selectionError = null
+                if (pendingPreview == null) {
+                    preparedImage = null
+                    if (initialEntry == ImportEntry.INCOMING) onBack?.invoke()
+                }
             },
             onConfirm = {
+                if (!busy) scope.launch { recognizePrepared(image) }
+            }
+        )
+    }
+
+    if (!choosingImage) pendingPreview?.let { preview ->
+        val confirmImport: () -> Unit = {
                 scope.launch {
+                    if (busy) return@launch
                     busy = true
                     try {
-                        when (preview) {
-                            is ImportPreview.Ics -> {
-                                if (overwriteMode) {
-                                    repo.clear(settings.timetableId)
-                                    toast("已覆盖原有数据")
-                                }
-                                val toImport = preview.courses.map { it.copy(timetableId = settings.timetableId) }
-                                for (c in toImport) repo.save(c)
-                                toast("导入成功：${toImport.size} 门课程")
-                            }
-                            is ImportPreview.Backup -> {
-                                // v2 备份：导入为新课表（每个 TimetableBackup 创建一个课表）
-                                val imported = preview.data.timetables
-                                val createdIds = timetableRepo.importTimetables(imported.map { it.timetable to it.courses })
-                                val totalCourses = imported.sumOf { it.courses.size }
-                                toast("恢复成功：${imported.size} 个课表 · $totalCourses 门课程")
-                                // 切换到第一个新建课表
-                                createdIds.firstOrNull()?.let { settingsRepo.setActiveTimetable(it) }
-                            }
-                            is ImportPreview.Pdf -> {
-                                if (overwriteMode) {
-                                    repo.clear(settings.timetableId)
-                                    toast("已覆盖原有数据")
-                                }
-                                val totalWeeks = settings.totalWeeks
-                                val periodCount = settings.periods.size.coerceAtLeast(1)
-                                val toImport = if (candidatesEdited) reviewCandidates else preview.result.candidates
-                                for (c in toImport) {
-                                    val sec = c.startSection.coerceIn(1, periodCount)
-                                    val dur = c.duration.coerceIn(1, (periodCount - sec + 1).coerceAtLeast(1))
-                                    val color = CourseColorPalette[
-                                        (c.name.hashCode() and Int.MAX_VALUE) % CourseColorPalette.size
-                                    ].toArgbLong()
-                                    repo.save(
-                                        Course(
-                                            timetableId = settings.timetableId,
-                                            name = c.name,
-                                            teacher = c.teacher,
-                                            location = c.location,
-                                            dayOfWeek = c.dayOfWeek.coerceIn(1, 7),
-                                            startSection = sec,
-                                            duration = dur,
-                                            startWeek = c.startWeek.coerceIn(1, totalWeeks),
-                                            endWeek = c.endWeek.coerceIn(1, totalWeeks),
-                                            weekType = c.weekType,
-                                            color = color
-                                        )
-                                    )
-                                }
-                                toast("导入成功：${toImport.size} 门课程")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        toast("导入失败：${e.message}")
-                    } finally {
-                        busy = false
+                        val toImport = reviewCandidates
+                        if (toImport.isNotEmpty() && toImport.all { it.fieldErrors(settings).isEmpty() }) {
+                            repo.importCourses(settings.timetableId, toImport.map { candidateToCourse(it, settings.timetableId) }, overwriteMode)
+                            toast("导入成功：${toImport.size} 条上课记录")
+                            flowState.clearDraft()
+                            flowState.completed.value = true
+                        } else toast("请先完成校对")
+                    } catch (e: Exception) { toast("导入失败：${e.message}") } finally { busy = false }
+                }
+        }
+        val session = visualSession
+        if (preview !is ImportPreview.Backup) UnifiedImportReview(
+            session = session, settings = settings, candidates = reviewCandidates,
+            sourceLabel = if (preview is ImportPreview.Pdf) preview.sourceLabel else "ICS 日历",
+            warnings = when (preview) { is ImportPreview.Pdf -> preview.result.warnings; is ImportPreview.Ics -> preview.warnings; else -> emptyList() },
+            onCandidates = { reviewCandidates = it; candidatesEdited = true; reviewDirty = true },
+            onDismiss = { flowState.clearDraft(); if (initialEntry == ImportEntry.INCOMING) onBack?.invoke() },
+            onConfirm = { overwriteMode = it; confirmImport() }, saving = busy,
+            hasEdits = reviewDirty,
+            onReselect = if (preparedImage != null) { { choosingImage = true; selectionError = null } } else null
+        ) else ImportPreviewDialog(
+            preview = preview, saving = busy,
+            onDismiss = { if (!busy) { pendingPreview = null; if (initialEntry == ImportEntry.INCOMING) onBack?.invoke() } },
+            onConfirm = {
+                scope.launch {
+                    if (busy) return@launch
+                    busy = true
+                    try {
+                        val imported = preview.data.timetables
+                        val createdIds = timetableRepo.importTimetables(imported.map { it.timetable to it.courses })
+                        createdIds.firstOrNull()?.let { settingsRepo.setActiveTimetable(it) }
+                        toast("恢复成功：${imported.size} 个课表")
                         pendingPreview = null
-                        if (initialEntry == ImportEntry.INCOMING) onBack?.invoke()
-                    }
+                        onImported()
+                    } catch (e: Exception) { toast("恢复失败：${e.message}") }
+                    finally { busy = false }
                 }
             }
         )
     }
 
-    editingCourse?.let { course ->
-        CourseEditorDialog(
-            course = course,
-            totalWeeks = settings.totalWeeks,
-            periodCount = settings.periods.size.coerceAtLeast(1),
-            onDismiss = {
-                editingCourse = null
-                editingCandidateIndex = -1
-            },
-            onSave = { saved ->
-                editingCourse = null
-                val idx = editingCandidateIndex
-                editingCandidateIndex = -1
-                if (idx in reviewCandidates.indices) {
-                    reviewCandidates = reviewCandidates.toMutableList().apply {
-                        this[idx] = courseToCandidate(saved)
-                    }
-                    candidatesEdited = true
-                }
-            }
-        )
-    }
 }
 
 @Composable
@@ -540,146 +603,19 @@ private fun ImportCard(
 }
 
 @Composable
-private fun ImportPreviewDialog(
-    preview: ImportPreview,
-    overwrite: Boolean,
-    pdfCandidates: List<CandidateCourse>,
-    onPdfEdit: (Int) -> Unit,
-    onPdfDelete: (Int) -> Unit,
-    onOverwriteChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    var deleteConfirmIndex by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(deleteConfirmIndex) {
-        if (deleteConfirmIndex != null) {
-            delay(5_000)
-            deleteConfirmIndex = null
+private fun ImportPreviewDialog(preview: ImportPreview.Backup, saving: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, canDismiss = { !saving }) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SheetHeader("确认恢复备份", "包含 ${preview.data.timetables.size} 个课表 · ${preview.data.timetables.sumOf { it.courses.size }} 条记录")
+            Text("备份将恢复为新的独立课表。", style = MaterialTheme.typography.bodyMedium)
+            if(preview.data.warnings.isNotEmpty()) Text(preview.data.warnings.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
+            Button(onClick = onConfirm, enabled = !saving, modifier = Modifier.fillMaxWidth()) { Text(if(saving) "正在恢复…" else "确认恢复") }
         }
-    }
-
-    val (title, countText, info) = when (preview) {
-        is ImportPreview.Ics -> Triple(
-            "确认导入",
-            "解析出 ${preview.courses.size} 条课程",
-            preview.warnings.take(6).joinToString("\n")
-        )
-        is ImportPreview.Backup -> Triple(
-            "确认恢复备份",
-            "包含 ${preview.data.timetables.size} 个课表 · ${preview.data.timetables.sumOf { it.courses.size }} 门课程",
-            preview.data.warnings.take(6).joinToString("\n")
-        )
-        is ImportPreview.Pdf -> Triple(
-            "确认导入 ${preview.sourceLabel}",
-            "识别出 ${preview.result.candidates.size} 门课程",
-            preview.result.warnings.take(6).joinToString("\n")
-        )
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(bottom = 12.dp)
-        ) {
-            SheetHeader(title = title, subtitle = countText)
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                if (info.isNotBlank()) {
-                    Text(info, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(12.dp))
-                }
-                if (preview is ImportPreview.Pdf && pdfCandidates.isNotEmpty()) {
-                    Text(
-                        "识别结果",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    SectionFrame {
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp)
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        items(pdfCandidates.size) { i ->
-                            val c = pdfCandidates[i]
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "${WEEKDAY_NAMES2.getOrNull(c.dayOfWeek - 1) ?: c.dayOfWeek} " +
-                                        "第${c.startSection}-${c.startSection + c.duration - 1}节  " +
-                                        "${c.startWeek}-${c.endWeek}周 " +
-                                        "${c.name} ${if (c.location.isNotBlank()) "· ${c.location}" else ""}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(vertical = 2.dp)
-                                )
-                                IconButton(onClick = { onPdfEdit(i) }) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
-                                }
-                                InlineDeleteAction(
-                                    armed = deleteConfirmIndex == i,
-                                    onArm = { deleteConfirmIndex = i },
-                                    onConfirm = {
-                                        onPdfDelete(i)
-                                        deleteConfirmIndex = null
-                                    },
-                                    compact = true
-                                )
-                            }
-                        }
-                    }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onOverwriteChange(!overwrite) }) {
-                    RadioButton(selected = overwrite, onClick = { onOverwriteChange(true) })
-                    Text("覆盖现有数据")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onOverwriteChange(!overwrite) }) {
-                    RadioButton(selected = !overwrite, onClick = { onOverwriteChange(false) })
-                    Text("合并（追加现有数据）")
-                }
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("取消") }
-                Button(onClick = onConfirm, modifier = Modifier.weight(1f)) { Text("确认导入") }
-            }
-        }
-    }
-}
-
-/** 从 content Uri 解码图片，限制最大边长避免 OOM */
-private fun decodeScaled(context: android.content.Context, uri: Uri): android.graphics.Bitmap? {
-    return try {
-        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
-        val maxDim = 4096
-        var sample = 1
-        while (maxOf(opts.outWidth, opts.outHeight) / sample > maxDim) {
-            sample *= 2
-        }
-        val finalOpts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-        context.contentResolver.openInputStream(uri)?.use {
-            android.graphics.BitmapFactory.decodeStream(it, null, finalOpts)
-        }
-    } catch (e: Throwable) {
-        null
     }
 }
 
 /** 候选课程 → 编辑用 Course（用于课程编辑对话框） */
-private fun candidateToCourse(c: CandidateCourse, timetableId: Long = 0): Course {
+internal fun candidateToCourse(c: CandidateCourse, timetableId: Long = 0): Course {
     return Course(
         id = 0,
         timetableId = timetableId,
@@ -699,7 +635,7 @@ private fun candidateToCourse(c: CandidateCourse, timetableId: Long = 0): Course
 }
 
 /** 编辑后的 Course → 候选课程（更新校对列表） */
-private fun courseToCandidate(c: Course): CandidateCourse {
+internal fun courseToCandidate(c: Course): CandidateCourse {
     return CandidateCourse(
         name = c.name,
         teacher = c.teacher,

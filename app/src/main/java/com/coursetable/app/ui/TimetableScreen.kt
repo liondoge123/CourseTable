@@ -560,7 +560,12 @@ private fun TimetableGrid(
     val lineColor = MaterialTheme.colorScheme.outlineVariant
     val surfaceColor = MaterialTheme.colorScheme.surface
     val todayColBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
-    val containerShape = RoundedCornerShape(12.dp)
+    val containerCornerRadius = 12.dp
+    val containerShape = RoundedCornerShape(containerCornerRadius)
+    val viewportShape = RoundedCornerShape(
+        topStart = containerCornerRadius,
+        topEnd = containerCornerRadius
+    )
 
     LaunchedEffect(vScroll, onAtBottomChanged) {
         if (onAtBottomChanged == null) return@LaunchedEffect
@@ -574,9 +579,13 @@ private fun TimetableGrid(
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
+                .padding(horizontal = 8.dp)
+                .clip(viewportShape)
                 .verticalScroll(vScroll)
-                .padding(top = topContentPadding, bottom = bottomContentPadding)
-                .padding(8.dp)
+                .padding(
+                    top = topContentPadding + 8.dp,
+                    bottom = bottomContentPadding + 8.dp
+                )
         ) {
             val viewportW = maxWidth
             val dayW = (viewportW - timeColW) / 7
@@ -623,36 +632,12 @@ private fun TimetableGrid(
                                 .height(headerH),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = WEEKDAY_NAMES[dayIndex],
-                                    fontSize = 11.sp,
-                                    lineHeight = 13.sp,
-                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isToday) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Box(
-                                    Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (isToday) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                            else Color.Transparent
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = date,
-                                        fontSize = 10.sp,
-                                        lineHeight = 10.sp,
-                                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isToday) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+                            TimetableDayHeader(
+                                label = WEEKDAY_NAMES[dayIndex],
+                                date = date,
+                                isToday = isToday,
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
                     }
                 }
@@ -671,30 +656,13 @@ private fun TimetableGrid(
                                     .height(slotH),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = "${row + 1}",
-                                        fontSize = 12.sp,
-                                        lineHeight = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    val period = periods.getOrNull(row)
-                                    if (period != null) {
-                                        Text(
-                                            text = period.start.toString().substring(0, 5),
-                                            fontSize = 10.sp,
-                                            lineHeight = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = period.end.toString().substring(0, 5),
-                                            fontSize = 10.sp,
-                                            lineHeight = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                                val period = periods.getOrNull(row)
+                                TimetablePeriodLabel(
+                                    section = row + 1,
+                                    startTime = period?.start?.toString()?.substring(0, 5),
+                                    endTime = period?.end?.toString()?.substring(0, 5),
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         }
                     }
@@ -757,114 +725,21 @@ private fun CourseCard(
 ) {
     val x = dayW * (course.dayOfWeek - 1) + timeColW + 1.5.dp
     val y = slotH * (course.startSection - 1) + 1.5.dp
-    val hAlign = if (alignLeft) Alignment.Start else Alignment.CenterHorizontally
-    val tAlign = if (alignLeft) TextAlign.Start else TextAlign.Center
     val accent = Color.fromStoredLong(course.color)
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val cardColor = if (dimmed) {
-        lerp(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurfaceVariant, if (isDark) 0.12f else 0.08f)
-    } else {
-        lerp(MaterialTheme.colorScheme.surface, accent, if (isDark) 0.28f else 0.16f)
-    }
-    val textAlpha = if (dimmed) 0.58f else 1f
-    val hasMeta = course.teacher.isNotBlank() || course.location.isNotBlank()
-    val nameMaxLines = when {
-        course.duration >= 3 -> 6
-        course.duration == 2 -> 5
-        else -> if (hasMeta) 2 else 3
-    }
-    val teacherMaxLines = if (course.duration == 1) 1 else 2
-    val locationMaxLines = if (course.duration == 1) 1 else 3
-    val shape = RoundedCornerShape(6.dp)
-    Box(
-        Modifier
+    TimetableCourseCardSurface(
+        name = course.name,
+        teacher = course.teacher,
+        location = course.location,
+        accent = accent,
+        duration = course.duration,
+        alignLeft = alignLeft,
+        dimmed = dimmed,
+        progress = progress,
+        onClick = onClick,
+        modifier = Modifier
             .offset(x = x, y = y)
             .size(width = dayW - 3.dp, height = slotH * course.duration - 3.dp)
-            .clip(shape)
-            .background(cardColor)
-            .border(
-                1.dp,
-                if (dimmed) MaterialTheme.colorScheme.outlineVariant else accent.copy(alpha = 0.32f),
-                shape
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = if (alignLeft) Alignment.TopStart else Alignment.Center
-    ) {
-        val barWidth = 3.5.dp
-        if (!dimmed) {
-            if (progress != null) {
-                val animatedProgress by animateFloatAsState(
-                    targetValue = progress,
-                    animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-                    label = "course_progress"
-                )
-                // 正在进行中：优雅双色垂直进度灌注条（半透明底轨 + 100% 饱和原色自上而下灌注）
-                Box(
-                    Modifier
-                        .align(Alignment.CenterStart)
-                        .fillMaxHeight()
-                        .width(barWidth)
-                        .background(accent.copy(alpha = 0.22f))
-                ) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .fillMaxHeight(fraction = animatedProgress.coerceIn(0f, 1f))
-                            .background(accent)
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .align(Alignment.CenterStart)
-                        .fillMaxHeight()
-                        .width(barWidth)
-                        .background(accent)
-                )
-            }
-        }
-        val startPad = if (dimmed) 4.5.dp else 6.dp
-        val endPad = if (dimmed) 4.5.dp else 3.dp
-        Column(
-            Modifier.padding(start = startPad, end = endPad, top = 3.dp, bottom = 3.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            horizontalAlignment = hAlign
-        ) {
-            Text(
-                text = course.name,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = textAlpha),
-                fontSize = 12.sp,
-                lineHeight = 13.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = tAlign,
-                maxLines = nameMaxLines,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (course.teacher.isNotBlank()) {
-                Text(
-                    text = course.teacher,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f * textAlpha),
-                    fontSize = 10.sp,
-                    lineHeight = 11.sp,
-                    textAlign = tAlign,
-                    maxLines = teacherMaxLines,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (course.location.isNotBlank()) {
-                Text(
-                    text = course.location,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.84f * textAlpha),
-                    fontSize = 10.sp,
-                    lineHeight = 11.sp,
-                    textAlign = tAlign,
-                    maxLines = locationMaxLines,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
+    )
 }
 
 @Composable

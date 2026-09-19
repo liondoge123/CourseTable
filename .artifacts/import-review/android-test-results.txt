@@ -1,0 +1,10 @@
+
+com.coursetable.app.UnifiedImportReviewTest:........
+com.coursetable.app.VisualImportReviewTest:........
+com.coursetable.app.PreviewScreenshotTest:..
+com.coursetable.app.ImportTransactionTest:.
+
+Time: 63.314
+
+OK (19 tests)
+

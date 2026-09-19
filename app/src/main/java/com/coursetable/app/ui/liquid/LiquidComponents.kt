@@ -6,6 +6,11 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -50,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,10 +64,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
@@ -294,17 +303,35 @@ fun OutlinedTextField(
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     val colors = LiquidTheme.colorScheme
+    var focused by remember { mutableStateOf(false) }
+    val fieldBackground by animateColorAsState(
+        targetValue = if (focused) {
+            lerp(colors.surfaceContainerHighest, colors.primary, if (colors.isDark) 0.12f else 0.05f)
+        } else colors.surfaceContainerHighest,
+        label = "text-field-background"
+    )
+    val fieldBorder by animateColorAsState(
+        targetValue = if (focused) colors.primary.copy(alpha = 0.78f) else colors.outlineVariant,
+        label = "text-field-border"
+    )
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.defaultMinSize(minHeight = 48.dp),
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .onFocusChanged { focused = it.isFocused },
         enabled = enabled,
         singleLine = singleLine,
         textStyle = LiquidTheme.typography.bodyLarge.copy(color = colors.onSurface),
+        cursorBrush = SolidColor(colors.primary),
         visualTransformation = visualTransformation,
         decorationBox = { inner ->
             Column(
-                Modifier.clip(shape).background(colors.surfaceContainerHigh).padding(horizontal = 14.dp, vertical = 10.dp),
+                Modifier
+                    .clip(shape)
+                    .background(fieldBackground)
+                    .border(if (focused) 1.5.dp else 1.dp, fieldBorder, shape)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 if (label != null) CompositionLocalProvider(LocalContentColor provides colors.onSurfaceVariant) { label() }
@@ -353,8 +380,18 @@ fun Switch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: Mo
 
 @Composable
 fun CircularProgressIndicator(modifier: Modifier = Modifier, color: Color = LiquidTheme.colorScheme.primary, strokeWidth: Dp = 2.dp) {
+    val transition = rememberInfiniteTransition(label = "circular-progress")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "circular-progress-rotation"
+    )
     androidx.compose.foundation.Canvas(modifier.defaultMinSize(20.dp, 20.dp)) {
-        drawArc(color, -90f, 270f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth.toPx(), cap = StrokeCap.Round))
+        drawArc(color, -90f + rotation, 270f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth.toPx(), cap = StrokeCap.Round))
     }
 }
 

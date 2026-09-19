@@ -8,6 +8,7 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
+import androidx.room.Transaction
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -93,6 +94,13 @@ interface CourseDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(course: Course): Long
 
+    @Transaction
+    suspend fun importCourses(timetableId: Long, courses: List<Course>, overwrite: Boolean) {
+        require(courses.all { it.timetableId == timetableId })
+        if (overwrite) deleteByTimetable(timetableId)
+        courses.forEach { upsert(it) }
+    }
+
     @Query("DELETE FROM courses WHERE id = :id")
     suspend fun deleteById(id: Long)
 
@@ -164,4 +172,6 @@ class CourseRepository(
     suspend fun save(course: Course): Long = dao.upsert(course)
     suspend fun delete(id: Long) = dao.deleteById(id)
     suspend fun clear(timetableId: Long) = dao.deleteByTimetable(timetableId)
+    suspend fun importCourses(timetableId: Long, courses: List<Course>, overwrite: Boolean) =
+        dao.importCourses(timetableId, courses, overwrite)
 }

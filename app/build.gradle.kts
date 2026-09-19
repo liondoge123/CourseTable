@@ -84,6 +84,12 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Compress native libraries in the distributed APK; Android extracts them on install.
+            useLegacyPackaging = true
+            // Universal APK contains the two supported ARM ABIs, matching the split outputs.
+            excludes += setOf("**/x86/**", "**/x86_64/**")
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -147,6 +153,7 @@ dependencies {
 
     implementation(libs.pdfbox.android)
     implementation(libs.mlkit.text.recognition.chinese)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
 
     implementation(libs.okhttp)
 

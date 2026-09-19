@@ -67,6 +67,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -111,6 +112,8 @@ fun ModalBottomSheet(
     onDismissRequest: () -> Unit,
     sheetState: LiquidSheetState = rememberModalBottomSheetState(),
     containerColor: Color = Color.Unspecified,
+    shape: Shape = RoundedRectangle(32.dp),
+    canDismiss: () -> Boolean = { true },
     content: @Composable () -> Unit
 ) {
     var drag by remember { mutableFloatStateOf(0f) }
@@ -122,9 +125,9 @@ fun ModalBottomSheet(
     val scrimVisibility = remember {
         MutableTransitionState(false).apply { targetState = true }
     }
-    val sheetShape = RoundedRectangle(32.dp)
-
+    val currentCanDismiss by androidx.compose.runtime.rememberUpdatedState(canDismiss)
     fun dismissAnimated(afterAction: (() -> Unit)? = null) {
+        if (!currentCanDismiss()) { drag = 0f; return }
         if (!dismissRequested) {
             dismissRequested = true
             pendingDismissAction = afterAction
@@ -233,7 +236,7 @@ fun ModalBottomSheet(
                                 indication = null,
                                 onClick = {}
                             ),
-                        shape = sheetShape,
+                        shape = shape,
                         baseColor = containerColor.takeUnless { it == Color.Unspecified },
                         shadowElevation = 24.dp
                     ) {

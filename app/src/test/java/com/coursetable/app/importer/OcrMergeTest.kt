@@ -30,12 +30,12 @@ class OcrMergeTest {
         val a = CandidateCourse(
             name = "高数", dayOfWeek = 1, startSection = 1, duration = 2,
             startWeek = 1, endWeek = 8, weekType = WeekType.ODD.code,
-            location = "A301", teacher = ""
+            location = "A301", teacher = "王老师"
         )
         val b = CandidateCourse(
             name = "高数", dayOfWeek = 1, startSection = 1, duration = 2,
             startWeek = 9, endWeek = 16, weekType = WeekType.ODD.code,
-            location = "", teacher = "王老师"
+            location = "A301", teacher = "王老师"
         )
         val merged = ImageTimetableOcr.mergeAcrossPages(listOf(a, b))
         assertEquals(1, merged.size)

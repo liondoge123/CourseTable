@@ -20,6 +20,7 @@ class CourseApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.coursetable.app.importer.TinyTextRecognizer.initialize(this)
         // pdfbox-android 需要从 assets 加载字体度量(.afm)等资源，必须在使用前初始化
         try {
             com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(this)

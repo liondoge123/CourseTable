@@ -204,6 +204,7 @@ private fun MainScreen(
                                 onIncomingConsumed()
                             },
                             initialEntry = activeImport ?: ImportEntry.HUB,
+                            onImported = { activeImport = null; destination = RootDestination.TIMETABLE },
                             onBack = {
                                 activeImport = null
                             }
@@ -242,6 +243,7 @@ private fun MainScreen(
                                     bottomContentPadding = FloatingDockInset
                                 )
                                 RootDestination.IMPORT -> ImportScreen(
+                                    onImported = { nestedPageOpen = false; destination = RootDestination.TIMETABLE },
                                     bottomContentPadding = FloatingDockInset,
                                     onSubpageChanged = { nestedPageOpen = it }
                                 )

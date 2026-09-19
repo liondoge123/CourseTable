@@ -29,6 +29,7 @@ object PdfTextReader {
                     try {
                         stripper.getText(doc)
                     } catch (t: Throwable) {
+                        pages.add(emptyList())
                         continue
                     }
                     pages.add(stripper.tokens)
@@ -60,7 +61,7 @@ object PdfTextReader {
 /**
  * PDF/图片课表解析的文字块（统一使用 y 向上坐标系：cell 越靠上 y 值越大）
  */
-data class TextToken(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val text: String) {
+data class TextToken(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val text: String, val needsReview: Boolean = false) {
     val cx: Float get() = (x0 + x1) / 2f
     val cy: Float get() = (y0 + y1) / 2f
     val height: Float get() = (y1 - y0).coerceAtLeast(4f)
@@ -79,10 +80,19 @@ data class CandidateCourse(
     val startWeek: Int,
     val endWeek: Int,
     val weekType: Int,
-    val rawLines: List<String> = emptyList()
-)
+    val rawLines: List<String> = emptyList(),
+    val sourceRegion: String? = null,
+    val needsReview: Boolean = false,
+    val sourceRegions: Set<String> = emptySet(),
+    val sourceRecords: List<CandidateCourse> = emptyList(),
+    val draftId: String? = null
+) {
+    fun belongsTo(id: String?) = id != null && (sourceRegion == id || id in sourceRegions)
+    fun excludingRegion(id: String): List<CandidateCourse> = if (!belongsTo(id)) listOf(this)
+        else if (sourceRecords.isNotEmpty()) sourceRecords.flatMap { it.excludingRegion(id) } else emptyList()
+}
 
-data class PdfParseResult(val candidates: List<CandidateCourse>, val warnings: List<String>)
+data class PdfParseResult(val candidates: List<CandidateCourse>, val warnings: List<String>, val regions: List<ImportRegion> = emptyList())
 
 /**
  * 网格重建（纯逻辑，便于单元测试）

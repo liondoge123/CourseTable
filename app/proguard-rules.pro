@@ -7,6 +7,7 @@
 -keep class org.apache.fontbox.** { *; }
 
 # ML Kit
+-keep class ai.onnxruntime.** { *; }
 -keep class com.google.mlkit.** { *; }
 -dontwarn com.google.mlkit.**
 

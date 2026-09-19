@@ -24,6 +24,9 @@ Examples:
 
 Release artifacts must be signed and have their package name, version, ABI, and checksum verified before publishing.
 
+Formal APKs, including the universal build, target approximately 30 MB. Small overruns are acceptable; the packaging script uses a 31,500,000-byte guard (5% headroom) to prevent substantial growth before handoff.
+The universal build contains arm64-v8a and armeabi-v7a. Native libraries are compressed in APKs and extracted by Android during installation.
+
 ## Automated builds
 
 Use the project script for both preview packages and formal releases:

@@ -67,16 +67,41 @@ function Resolve-AndroidSdk {
 }
 
 function Configure-Java {
+    $criteriaFile = Join-Path $repoRoot 'gradle\gradle-daemon-jvm.properties'
+    $requiredMajor = 25
+    if (Test-Path -LiteralPath $criteriaFile) {
+        $versionLine = Get-Content -LiteralPath $criteriaFile |
+            Where-Object { $_ -match '^toolchainVersion=\d+$' } |
+            Select-Object -First 1
+        if (-not $versionLine) { throw "Missing toolchainVersion in $criteriaFile" }
+        $requiredMajor = [int]($versionLine -replace '^toolchainVersion=', '')
+    }
+
     if ($env:JAVA_HOME -and (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
+        Write-Host "Gradle launcher JAVA_HOME: $env:JAVA_HOME"
+        Write-Host "Gradle build JVM requirement: Java $requiredMajor (selected by Gradle)"
         return
     }
-    $jdkRoot = Join-Path $env:USERPROFILE '.jdks'
-    $candidate = Get-ChildItem -LiteralPath $jdkRoot -Directory -Filter 'jbr-21*' -ErrorAction SilentlyContinue |
-        Sort-Object Name -Descending |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin\java.exe') } |
+    $gradleUserHome = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $env:USERPROFILE '.gradle' }
+    $jdkRoots = @((Join-Path $gradleUserHome 'jdks'), (Join-Path $env:USERPROFILE '.jdks'))
+    $candidate = $jdkRoots |
+        ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory -ErrorAction SilentlyContinue } |
+        Sort-Object FullName |
+        Where-Object {
+            $javaExecutable = Join-Path $_.FullName 'bin\java.exe'
+            $releaseFile = Join-Path $_.FullName 'release'
+            if ((Test-Path -LiteralPath $javaExecutable) -and (Test-Path -LiteralPath $releaseFile)) {
+                $javaVersionLine = Get-Content -LiteralPath $releaseFile |
+                    Where-Object { $_ -match '^JAVA_VERSION="' } |
+                    Select-Object -First 1
+                $javaVersionLine -match ('^JAVA_VERSION="{0}(?:[.\-"])' -f $requiredMajor)
+            }
+        } |
         Select-Object -First 1
-    if (-not $candidate) { throw 'JBR/JDK 21 not found. Set JAVA_HOME before running this script.' }
+    if (-not $candidate) { throw "JDK $requiredMajor not found in Gradle/user JDK directories. Set JAVA_HOME before running this script." }
     $env:JAVA_HOME = $candidate.FullName
+    Write-Host "Gradle launcher JAVA_HOME: $env:JAVA_HOME (fallback)"
+    Write-Host "Gradle build JVM requirement: Java $requiredMajor (selected by Gradle)"
 }
 
 $state = Read-VersionState
@@ -98,13 +123,15 @@ if ($Mode -eq 'release' -and ([version]$nextName -le [version]$lastRelease)) {
 
 $displayName = if ($Mode -eq 'preview') { "$nextName-preview" } else { $nextName }
 Write-Host "Planned build: $displayName (versionCode $nextCode)"
+Configure-Java
 if ($DryRun) { return }
 
 Write-VersionState -name $nextName -code $nextCode -lastRelease $lastRelease
-Configure-Java
-$socketDir = Join-Path $repoRoot '.unix-sockets'
-[IO.Directory]::CreateDirectory($socketDir) | Out-Null
-$env:JAVA_TOOL_OPTIONS = "-Djdk.net.unixdomain.tmpdir=$socketDir"
+$buildTempDir = Join-Path $repoRoot '.gradle\tmp'
+[IO.Directory]::CreateDirectory($buildTempDir) | Out-Null
+$env:TEMP = $buildTempDir
+$env:TMP = $buildTempDir
+$env:JAVA_TOOL_OPTIONS = ($env:JAVA_TOOL_OPTIONS + " `"-Djava.io.tmpdir=$buildTempDir`" `"-Djdk.net.unixdomain.tmpdir=$buildTempDir`"").Trim()
 
 $variantTask = if ($Mode -eq 'preview') { 'assemblePreview' } else { 'assembleRelease' }
 $variantDirectory = if ($Mode -eq 'preview') { 'preview' } else { 'release' }
@@ -172,6 +199,9 @@ foreach ($element in $metadata.elements) {
     if ([string]$element.versionName -ne $displayName) { throw "Unexpected versionName in $($element.outputFile)" }
     $apk = Join-Path $outputDirectory $element.outputFile
     if (-not (Test-Path -LiteralPath $apk)) { throw "Missing APK: $apk" }
+    if ($Mode -eq 'release' -and (Get-Item -LiteralPath $apk).Length -gt 31500000) {
+        throw "Release APK exceeds the approximate 30 MB budget (31,500,000-byte guard): $apk"
+    }
 
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
