@@ -69,6 +69,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -865,14 +867,40 @@ private fun LibraryDialogActions(
 }
 
 @Composable
-fun DropdownMenuItem(text: @Composable () -> Unit, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minWidth = 140.dp, minHeight = 42.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) { text() }
+fun DropdownMenuItem(
+    text: @Composable () -> Unit,
+    onClick: () -> Unit,
+    selected: Boolean = false
+) {
+    val colors = LiquidTheme.colorScheme
+    val contentColor = if (selected) colors.primary else colors.onSurface
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    if (selected) colors.primary.copy(alpha = if (colors.isDark) 0.20f else 0.12f)
+                    else Color.Transparent
+                )
+                .semantics { this.selected = selected }
+                .defaultMinSize(minWidth = 140.dp, minHeight = 44.dp)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            text()
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "当前课表",
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(20.dp),
+                    tint = colors.primary
+                )
+            }
+        }
+    }
 }

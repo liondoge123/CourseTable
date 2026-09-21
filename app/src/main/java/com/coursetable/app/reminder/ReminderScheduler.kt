@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.coursetable.app.MainActivity
@@ -20,6 +19,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -123,7 +123,7 @@ object ReminderScheduler {
             .map { "${it.key}@${it.value}" }.toSet()
 
         val now = LocalDateTime.now()
-        val timeStr = String.format("%02d月%02d日 %02d:%02d:%02d",
+        val timeStr = String.format(Locale.getDefault(), "%02d月%02d日 %02d:%02d:%02d",
             now.monthValue, now.dayOfMonth, now.hour, now.minute, now.second)
         val oldLog = prefs.getString(KEY_FIRED_LOG, "").orEmpty()
             .split("\n").filter { it.isNotBlank() }
@@ -229,17 +229,15 @@ object ReminderScheduler {
             context, requestCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        // setAlarmClock：系统闹钟级唤醒，App 被杀/国产 ROM 限制下也能准点触发。
-        // 最终只表现为通知栏一条消息，副作用是状态栏出现闹钟图标。
-        val showIntent = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        alarmManager.setAlarmClock(
-            AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent),
-            pi
-        )
+        if (canScheduleExactAlarms(context)) {
+            try {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
+                return
+            } catch (_: SecurityException) {
+                // Permission may be revoked between the capability check and scheduling.
+            }
+        }
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
     }
 
     /** 每日重排闹钟，保证长期未打开 App 时提醒也能持续 */
@@ -254,12 +252,8 @@ object ReminderScheduler {
         var next = LocalDateTime.of(LocalDate.now(), LocalTime.of(REPLAN_HOUR, REPLAN_MINUTE))
         if (!next.isAfter(now)) next = next.plusDays(1)
         val millis = next.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val showIntent = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(millis, showIntent), pi)
+        // Daily maintenance does not need exact timing. A 30-minute window is sufficient.
+        alarmManager.setWindow(AlarmManager.RTC_WAKEUP, millis, 30 * 60 * 1000L, pi)
     }
 
     private fun cancelAlarm(context: Context, requestCode: Int) {
@@ -357,6 +351,38 @@ object ReminderScheduler {
             ) == PackageManager.PERMISSION_GRANTED
     }
 
+    fun canScheduleExactAlarms(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        return alarmManager.canScheduleExactAlarms()
+    }
+
+    fun openExactAlarmSettings(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        try {
+            context.startActivity(
+                Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        } catch (_: Exception) {
+            openAppDetails(context)
+        }
+    }
+
+    private fun openAppDetails(context: Context) {
+        try {
+            context.startActivity(
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        } catch (_: Exception) {
+        }
+    }
+
     /** 渠道重要性是否 ≥ HIGH（决定通知是否有顶部横幅） */
     fun isChannelHighImportance(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
@@ -440,30 +466,6 @@ object ReminderScheduler {
         }
     }
 
-    /** 是否已加入电池优化白名单（未加入时国产 ROM 可能延迟/丢弃闹钟） */
-    fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        return pm.isIgnoringBatteryOptimizations(context.packageName)
-    }
-
-    /** 跳转"请求忽略电池优化"授权页 */
-    fun requestIgnoreBatteryOptimizations(context: Context) {
-        try {
-            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = android.net.Uri.parse("package:${context.packageName}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            try {
-                val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-            } catch (_: Exception) {
-            }
-        }
-    }
 }
 
 /** 接收闹钟广播：发通知 + 重排后续提醒 */
@@ -536,10 +538,12 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 }
 
-/** 开机后重排提醒 */
+/** 开机或重新授予精确闹钟权限后重排提醒 */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        ) {
             ReminderScheduler.rescheduleAsync(context, goAsync())
         }
     }

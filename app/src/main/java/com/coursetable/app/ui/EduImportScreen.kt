@@ -1,7 +1,11 @@
 package com.coursetable.app.ui
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -19,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +69,27 @@ fun EduImportScreen(
     var customUrl by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var currentUrl by remember { mutableStateOf<String?>(null) }
+    var activeWebView by remember { mutableStateOf<WebView?>(null) }
+
+    fun clearWebSession() {
+        activeWebView?.let { webView ->
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.clearHistory()
+            webView.clearCache(true)
+            webView.removeAllViews()
+            webView.destroy()
+        }
+        activeWebView = null
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        WebStorage.getInstance().deleteAllData()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { clearWebSession() }
+    }
 
     FullscreenPageContainer {
         Column(
@@ -136,7 +162,7 @@ fun EduImportScreen(
                                 if (parsed != null) {
                                     adapter = ZfJwglxtAdapter(parsed)
                                 } else {
-                                    message = "无法识别登录页地址，请确认是正方教务 jwglxt 登录页"
+                                    message = "只支持 HTTPS 的正方教务登录页，请检查地址"
                                 }
                             },
                             enabled = customUrl.isNotBlank(),
@@ -157,24 +183,63 @@ fun EduImportScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val shownUri = currentUrl?.let(Uri::parse)
+            val shownHost = shownUri?.host ?: Uri.parse(school.loginUrl).host.orEmpty()
+            val cleartextPage = shownUri?.scheme.equals("http", ignoreCase = true)
+            Text(
+                if (cleartextPage) {
+                    "当前域名：$shownHost · 明文 HTTP（会话可能被同一网络中的攻击者窃取）"
+                } else {
+                    "当前域名：$shownHost · HTTPS"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (cleartextPage) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+            )
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
+                        activeWebView = this
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.javaScriptCanOpenWindowsAutomatically = false
+                        settings.setSupportMultipleWindows(false)
+                        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        settings.safeBrowsingEnabled = true
                         settings.userAgentString =
                             "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                         webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                if (request == null || !request.isForMainFrame) return false
+                                val target = request.url
+                                val host = target.host?.lowercase().orEmpty()
+                                val scheme = target.scheme?.lowercase().orEmpty()
+                                val allowed = host in school.allowedHosts &&
+                                    (scheme == "https" || (scheme == "http" && host in school.cleartextHosts))
+                                if (!allowed) {
+                                    message = "已阻止跳转到未授权域名：${host.ifBlank { "未知域名" }}"
+                                }
+                                return !allowed
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
+                                currentUrl = url
                                 CookieManager.getInstance().flush()
                             }
                         }
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        loadUrl(school.loginUrl)
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        cookieManager.setAcceptThirdPartyCookies(this, false)
+                        val webView = this
+                        cookieManager.removeAllCookies {
+                            webView.post {
+                                if (activeWebView === webView) webView.loadUrl(school.loginUrl)
+                            }
+                        }
                     }
                 },
-                update = { it.loadUrl(school.loginUrl) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -182,14 +247,18 @@ fun EduImportScreen(
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { adapter = null }) { Text("重新选择学校") }
+                OutlinedButton(onClick = {
+                    clearWebSession()
+                    currentUrl = null
+                    adapter = null
+                }) { Text("重新选择学校") }
                 Button(
                     onClick = {
                         scope.launch {
                             busy = true
                             message = null
                             try {
-                                val cookies = CookieManager.getInstance().getCookie(school.loginUrl).orEmpty()
+                                val cookies = CookieManager.getInstance().getCookie(school.cookieOrigin).orEmpty()
                                 if (cookies.isBlank()) {
                                     message = "尚未登录，请先在页面中完成登录"
                                     return@launch
@@ -202,10 +271,11 @@ fun EduImportScreen(
                                 if (result.candidates.isEmpty()) {
                                     message = result.warnings.joinToString("\n").ifBlank { "未解析到课程" }
                                 } else {
+                                    clearWebSession()
                                     onDone(result, school.name)
                                 }
                             } catch (e: Exception) {
-                                message = "导入失败：${e.message}"
+                                message = "导入失败，请确认登录状态和网络后重试"
                             } finally {
                                 busy = false
                             }
@@ -260,4 +330,3 @@ private fun SchoolButton(
         }
     }
 }
-

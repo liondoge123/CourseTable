@@ -104,7 +104,14 @@ object VisualTimetableImporter {
         val pages = mutableListOf<ImportPage>(); val candidates = mutableListOf<CandidateCourse>()
         val regions = mutableListOf<ImportRegion>(); val warnings = mutableListOf<String>(); var usedText = false
         try {
-            val textPages = if (pdf) context.contentResolver.openInputStream(uri)?.use { PdfTextReader.extractByPage(it.readBytes()) }.orEmpty() else emptyList()
+            val sourceUri = if (pdf) {
+                val source = File(dir, "source.pdf")
+                ImportPolicy.copyToFile(context, uri, source, DetectedImportType.PDF)
+                Uri.fromFile(source)
+            } else uri
+            val textPages = if (pdf) {
+                PdfTextReader.extractByPage(File(sourceUri.path ?: error("PDF 路径无效")))
+            } else emptyList()
             var inherited = emptyList<TextToken>(); var previousWidth = 0
             suspend fun parse(index: Int, bmp: Bitmap) {
                 val text = textPages.getOrNull(index).orEmpty()
@@ -132,10 +139,15 @@ object VisualTimetableImporter {
                 val file = File(dir, "page-$index.jpg")
                 file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
                 pages.add(ImportPage(index, file, bmp.width, bmp.height, tokens))
-                candidates.addAll(parsed.candidates); regions.addAll(parsed.regions)
+                val remaining = (ImportPolicy.MAX_OUTPUT_COURSES - candidates.size).coerceAtLeast(0)
+                candidates.addAll(parsed.candidates.take(remaining))
+                if (parsed.candidates.size > remaining && warnings.none { it.contains("课程数量超过") }) {
+                    warnings.add("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 门，已停止追加")
+                }
+                regions.addAll(parsed.regions)
                 warnings.addAll(parsed.warnings.map { "第${index + 1}页：$it" })
             }
-            if (pdf) warnings.addAll(PdfRendererUtil.forEachPage(context, uri, onPage = { i, bmp -> parse(i, bmp) }))
+            if (pdf) warnings.addAll(PdfRendererUtil.forEachPage(context, sourceUri, onPage = { i, bmp -> parse(i, bmp) }))
             else {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }

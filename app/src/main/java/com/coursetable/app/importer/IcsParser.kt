@@ -36,6 +36,9 @@ object IcsParser {
     )
 
     fun parse(content: String): IcsParseResult {
+        if (content.length > DetectedImportType.ICS.maxBytes) {
+            return IcsParseResult(emptyList(), listOf("日历文件过大"))
+        }
         val warnings = mutableListOf<String>()
         val unfolded = unfold(content)
         val components = splitComponents(unfolded)
@@ -83,6 +86,12 @@ object IcsParser {
             when (comp.name) {
                 "VCALENDAR" -> collectEvents(comp.children, out, warnings)
                 "VEVENT", "VTODO" -> {
+                    if (out.size >= ImportPolicy.MAX_OUTPUT_COURSES) {
+                        if (warnings.none { it.contains("日程数量超过") }) {
+                            warnings.add("日程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 条，已停止读取")
+                        }
+                        return
+                    }
                     val props = comp.properties
                     val startProp = props["DTSTART"]?.firstOrNull()
                     val endProp = props["DTEND"]?.firstOrNull()
@@ -106,9 +115,9 @@ object IcsParser {
                     }
 
                     val event = IcsEvent(
-                        summary = props["SUMMARY"]?.firstOrNull()?.value.orEmpty(),
-                        location = props["LOCATION"]?.firstOrNull()?.value.orEmpty(),
-                        description = props["DESCRIPTION"]?.firstOrNull()?.value.orEmpty(),
+                        summary = props["SUMMARY"]?.firstOrNull()?.value.orEmpty().take(ImportPolicy.MAX_TEXT_FIELD),
+                        location = props["LOCATION"]?.firstOrNull()?.value.orEmpty().take(ImportPolicy.MAX_TEXT_FIELD),
+                        description = props["DESCRIPTION"]?.firstOrNull()?.value.orEmpty().take(ImportPolicy.MAX_TEXT_FIELD),
                         date = date,
                         startTime = parsedStart.time,
                         endTime = parsedEnd?.time,

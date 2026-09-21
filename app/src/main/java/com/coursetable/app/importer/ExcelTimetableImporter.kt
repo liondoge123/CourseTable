@@ -2,11 +2,20 @@ package com.coursetable.app.importer
 
 import com.coursetable.app.data.WeekType
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.util.zip.ZipInputStream
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 
 object ExcelTimetableImporter {
+
+    private const val MAX_ZIP_ENTRIES = 256
+    private const val MAX_XML_BYTES = 16L * 1024 * 1024
+    private const val MAX_UNCOMPRESSED_BYTES = 64L * 1024 * 1024
+    private const val MAX_ROWS = 10_000
+    private const val MAX_COLUMNS = 256
+    private const val MAX_CELLS = 100_000
 
     private val DAY_NUM = mapOf(
         "一" to 1, "二" to 2, "三" to 3, "四" to 4,
@@ -41,7 +50,7 @@ object ExcelTimetableImporter {
         val candidates = mutableListOf<CandidateCourse>()
         for (i in (headerIdx + 1) until rows.size) {
             val row = rows[i]
-            val name = cellAt(row, colName).trim()
+            val name = cellAt(row, colName).trim().take(ImportPolicy.MAX_TEXT_FIELD)
             if (name.isEmpty()) continue
             val day = parseDay(cellAt(row, colDay))
             if (day == null) {
@@ -55,8 +64,8 @@ object ExcelTimetableImporter {
                 continue
             }
             val duration = ((endSection ?: startSection) - startSection + 1).coerceAtLeast(1)
-            val teacher = if (colTeacher >= 0) cellAt(row, colTeacher).trim() else ""
-            val location = if (colLocation >= 0) cellAt(row, colLocation).trim() else ""
+            val teacher = if (colTeacher >= 0) cellAt(row, colTeacher).trim().take(ImportPolicy.MAX_TEXT_FIELD) else ""
+            val location = if (colLocation >= 0) cellAt(row, colLocation).trim().take(ImportPolicy.MAX_TEXT_FIELD) else ""
             val teacherClean = if (teacher == "无" || teacher.isEmpty()) "" else teacher
             val locationClean = if (location == "无" || location.isEmpty()) "" else location
             val weekSegments = parseWeekSegments(cellAt(row, colWeeks))
@@ -65,6 +74,10 @@ object ExcelTimetableImporter {
                 continue
             }
             for ((ws, we, wt) in weekSegments) {
+                if (candidates.size >= ImportPolicy.MAX_OUTPUT_COURSES) {
+                    warnings.add("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 门，已停止读取")
+                    return PdfParseResult(candidates, warnings)
+                }
                 candidates.add(
                     CandidateCourse(
                         name = name,
@@ -76,7 +89,7 @@ object ExcelTimetableImporter {
                         startWeek = ws,
                         endWeek = we,
                         weekType = wt,
-                        rawLines = row.filter { it.isNotBlank() }
+                        rawLines = row.filter { it.isNotBlank() }.take(64).map { it.take(ImportPolicy.MAX_TEXT_FIELD) }
                     )
                 )
             }
@@ -91,10 +104,23 @@ object ExcelTimetableImporter {
         try {
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
                 var entry = zip.nextEntry
+                var entryCount = 0
+                var extracted = 0L
                 while (entry != null) {
+                    entryCount++
+                    if (entryCount > MAX_ZIP_ENTRIES) throw ImportRejectedException("XLSX 包含过多文件")
+                    val selected = entry.name == "xl/sharedStrings.xml" || entry.name == "xl/worksheets/sheet1.xml"
+                    val entryData = readZipEntry(zip, selected, MAX_UNCOMPRESSED_BYTES - extracted)
+                    extracted += entryData.bytesRead
+                    if (extracted > MAX_UNCOMPRESSED_BYTES) throw ImportRejectedException("XLSX 解压后数据过大")
                     when (entry.name) {
-                        "xl/sharedStrings.xml" -> shared.addAll(readSharedStrings(zip.readBytes()))
-                        "xl/worksheets/sheet1.xml" -> sheetXml = zip.readBytes()
+                        "xl/sharedStrings.xml" -> {
+                            val data = entryData.content ?: throw ImportRejectedException("XLSX 字符串表无法读取")
+                            shared.addAll(readSharedStrings(data))
+                        }
+                        "xl/worksheets/sheet1.xml" -> {
+                            sheetXml = entryData.content ?: throw ImportRejectedException("XLSX 工作表无法读取")
+                        }
                     }
                     zip.closeEntry()
                     entry = zip.nextEntry
@@ -104,8 +130,12 @@ object ExcelTimetableImporter {
             return PdfParseResult(emptyList(), warnings + "无法读取 xlsx 文件：${e.message}")
         }
         val sheet = sheetXml ?: return PdfParseResult(emptyList(), warnings + "xlsx 中未找到工作表")
-        val grid = readSheetGrid(sheet, shared)
-        return parseGrid(grid, warnings)
+        return try {
+            val grid = readSheetGrid(sheet, shared)
+            parseGrid(grid, warnings)
+        } catch (_: Exception) {
+            PdfParseResult(emptyList(), warnings + "xlsx 内容异常或包含不安全的 XML")
+        }
     }
 
     internal fun parseGrid(grid: List<List<String?>>, warnings: MutableList<String> = mutableListOf()): PdfParseResult {
@@ -141,7 +171,13 @@ object ExcelTimetableImporter {
                 val lines = cell.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
                 if (lines.isEmpty()) continue
                 val parsed = PdfCellParser.parse(lines, day, section)
-                if (parsed != null) candidates.add(parsed)
+                if (parsed != null) {
+                    if (candidates.size >= ImportPolicy.MAX_OUTPUT_COURSES) {
+                        warnings.add("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 门，已停止读取")
+                        return PdfParseResult(candidates, warnings)
+                    }
+                    candidates.add(parsed)
+                }
             }
         }
         return PdfParseResult(candidates, warnings)
@@ -151,8 +187,9 @@ object ExcelTimetableImporter {
         val doc = parseXml(xml)
         val result = mutableListOf<String>()
         val siList = doc.getElementsByTagNameNS("*", "si")
+        if (siList.length > MAX_CELLS) throw ImportRejectedException("XLSX 共享字符串数量过多")
         for (i in 0 until siList.length) {
-            result.add(collectText(siList.item(i), StringBuilder()).toString())
+            result.add(collectText(siList.item(i), StringBuilder()).toString().take(ImportPolicy.MAX_TEXT_FIELD))
         }
         return result
     }
@@ -160,6 +197,7 @@ object ExcelTimetableImporter {
     private fun readSheetGrid(xml: ByteArray, shared: List<String>): List<List<String?>> {
         val doc = parseXml(xml)
         val cells = doc.getElementsByTagNameNS("*", "c")
+        if (cells.length > MAX_CELLS) throw ImportRejectedException("XLSX 单元格数量过多")
         val map = mutableMapOf<Pair<Int, Int>, String>()
         var maxRow = -1
         var maxCol = -1
@@ -177,7 +215,7 @@ object ExcelTimetableImporter {
                 else -> value = firstText(c, "v")
             }
             if (value.isNotBlank()) {
-                map[ref] = value
+                map[ref] = value.take(ImportPolicy.MAX_TEXT_FIELD)
                 if (ref.first > maxRow) maxRow = ref.first
                 if (ref.second > maxCol) maxCol = ref.second
             }
@@ -192,10 +230,11 @@ object ExcelTimetableImporter {
     }
 
     private fun parseRef(ref: String): Pair<Int, Int>? {
-        val m = Regex("([A-Z]+)(\\d+)").find(ref) ?: return null
-        val col = m.groupValues[1].fold(0) { acc, ch -> acc * 26 + (ch - 'A' + 1) } - 1
+        val m = Regex("^([A-Z]{1,4})(\\d{1,7})$").matchEntire(ref) ?: return null
+        val colLong = m.groupValues[1].fold(0L) { acc, ch -> acc * 26 + (ch - 'A' + 1) } - 1
         val row = m.groupValues[2].toIntOrNull()?.minus(1) ?: return null
-        return row to col
+        if (row !in 0 until MAX_ROWS || colLong !in 0 until MAX_COLUMNS) return null
+        return row to colLong.toInt()
     }
 
     private fun firstText(element: Element, tag: String): String {
@@ -214,13 +253,37 @@ object ExcelTimetableImporter {
     }
 
     private fun parseXml(bytes: ByteArray): org.w3c.dom.Document {
+        val raw = bytes.toString(Charsets.ISO_8859_1)
+        if (raw.contains("<!DOCTYPE", ignoreCase = true) || raw.contains("<!ENTITY", ignoreCase = true)) {
+            throw ImportRejectedException("XLSX XML 包含禁止的文档类型或实体")
+        }
         val factory = DocumentBuilderFactory.newInstance()
         factory.isNamespaceAware = true
-        try {
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        } catch (_: Exception) {
-        }
+        runCatching { factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true) }
+        runCatching { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+        runCatching { factory.setFeature("http://xml.org/sax/features/external-general-entities", false) }
+        runCatching { factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+        runCatching { factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
+        runCatching { factory.isXIncludeAware = false }
+        factory.isExpandEntityReferences = false
         return factory.newDocumentBuilder().parse(ByteArrayInputStream(bytes))
+    }
+
+    private data class ZipEntryData(val content: ByteArray?, val bytesRead: Long)
+
+    private fun readZipEntry(zip: ZipInputStream, collect: Boolean, remainingTotal: Long): ZipEntryData {
+        val output = if (collect) ByteArrayOutputStream() else null
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = zip.read(buffer)
+            if (read < 0) break
+            total += read
+            if (collect && total > MAX_XML_BYTES) throw ImportRejectedException("XLSX 内部 XML 过大")
+            if (total > remainingTotal) throw ImportRejectedException("XLSX 解压后数据过大")
+            output?.write(buffer, 0, read)
+        }
+        return ZipEntryData(output?.toByteArray(), total)
     }
 
     private fun parseDay(text: String): Int? {
@@ -276,6 +339,7 @@ object ExcelTimetableImporter {
         var field = StringBuilder()
         var row = mutableListOf<String>()
         var inQuotes = false
+        var cellCount = 0
         var i = 0
         while (i < content.length) {
             val ch = content[i]
@@ -291,13 +355,20 @@ object ExcelTimetableImporter {
                 ch == '"' -> inQuotes = true
                 ch == ',' -> {
                     row.add(field.toString())
+                    cellCount++
+                    if (row.size > MAX_COLUMNS) throw ImportRejectedException("CSV 列数过多")
+                    if (cellCount > MAX_CELLS) throw ImportRejectedException("CSV 数据量过大")
                     field = StringBuilder()
                 }
                 ch == '\n' || ch == '\r' -> {
                     if (ch == '\r' && i + 1 < content.length && content[i + 1] == '\n') i++
                     row.add(field.toString())
+                    cellCount++
+                    if (row.size > MAX_COLUMNS) throw ImportRejectedException("CSV 列数过多")
+                    if (cellCount > MAX_CELLS) throw ImportRejectedException("CSV 数据量过大")
                     field = StringBuilder()
                     if (row.any { it.isNotBlank() }) rows.add(row)
+                    if (rows.size > MAX_ROWS) throw ImportRejectedException("CSV 数据量过大")
                     row = mutableListOf()
                 }
                 else -> field.append(ch)
@@ -306,7 +377,10 @@ object ExcelTimetableImporter {
         }
         if (field.isNotEmpty() || row.isNotEmpty()) {
             row.add(field.toString())
+            cellCount++
+            if (row.size > MAX_COLUMNS || cellCount > MAX_CELLS) throw ImportRejectedException("CSV 数据量过大")
             if (row.any { it.isNotBlank() }) rows.add(row)
+            if (rows.size > MAX_ROWS) throw ImportRejectedException("CSV 数据量过大")
         }
         return rows
     }

@@ -7,8 +7,8 @@ import android.graphics.BitmapRegionDecoder
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.RectF
-import android.media.ExifInterface
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -45,11 +45,16 @@ object ImageImportPreparation {
         val directory = File(context.cacheDir, "image-selection-${java.util.UUID.randomUUID()}").apply { mkdirs() }
         try {
             val original = File(directory, "original")
-            context.contentResolver.openInputStream(uri)?.use { input -> original.outputStream().use { input.copyTo(it) } }
-                ?: error("无法读取图片")
+            ImportPolicy.copyToFile(context, uri, original, DetectedImportType.IMAGE)
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(original.absolutePath, bounds)
             require(bounds.outWidth > 0 && bounds.outHeight > 0) { "图片格式无法读取" }
+            require(bounds.outWidth <= ImportPolicy.MAX_IMAGE_DIMENSION && bounds.outHeight <= ImportPolicy.MAX_IMAGE_DIMENSION) {
+                "图片尺寸过大，无法安全导入"
+            }
+            require(bounds.outWidth.toLong() * bounds.outHeight <= ImportPolicy.MAX_IMAGE_SOURCE_PIXELS) {
+                "图片像素过多，无法安全导入"
+            }
             val orientation = runCatching { ExifInterface(original.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)
             val prepared = PreparedImportImage(directory, original, File(directory, "preview.jpg"), bounds.outWidth, bounds.outHeight, orientation)
             val bitmap = decodeSelection(prepared, ImageSelection())

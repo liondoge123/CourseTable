@@ -117,7 +117,6 @@ fun SettingsScreen(
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showThemeModePicker by remember { mutableStateOf(false) }
     var showTimetableManage by remember { mutableStateOf(false) }
-    var showBatteryDialog by remember { mutableStateOf(false) }
     var showPermDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -152,7 +151,7 @@ fun SettingsScreen(
     }
     val permNotification = remember(permTick) { ReminderScheduler.canPostNotifications(context) }
     val permChannelHigh = remember(permTick) { ReminderScheduler.isChannelHighImportance(context) }
-    val permBattery = remember(permTick) { ReminderScheduler.isIgnoringBatteryOptimizations(context) }
+    val permExactAlarm = remember(permTick) { ReminderScheduler.canScheduleExactAlarms(context) }
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -189,18 +188,14 @@ fun SettingsScreen(
         if (!granted) {
             toast("未授予通知权限，可能无法收到提醒")
         }
-        if (!ReminderScheduler.isIgnoringBatteryOptimizations(context)) {
-            showBatteryDialog = true
-        }
+        if (!ReminderScheduler.canScheduleExactAlarms(context)) ReminderScheduler.openExactAlarmSettings(context)
     }
 
-    /** 开启提醒：先确保通知权限，再提示电池优化白名单 */
+    /** 开启提醒：先确保通知权限，再引导授予精确闹钟特殊访问。 */
     fun enableReminder() {
         fun afterPermission() {
             scope.launch { settingsRepo.save(reminderEnabled = true) }
-            if (!ReminderScheduler.isIgnoringBatteryOptimizations(context)) {
-                showBatteryDialog = true
-            }
+            if (!ReminderScheduler.canScheduleExactAlarms(context)) ReminderScheduler.openExactAlarmSettings(context)
         }
         if (ReminderScheduler.canPostNotifications(context)) {
             afterPermission()
@@ -309,25 +304,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showBatteryDialog) {
-        AlertDialog(
-            onDismissRequest = { showBatteryDialog = false },
-            title = { Text("允许后台运行") },
-            text = { Text("为保证课前提醒准点送达，建议完成以下设置：\n1. 允许通知权限与横幅通知\n2. 加入电池优化白名单\n3. 在自启动管理中允许本应用\n\n稍后可在「提醒 → 权限检查」中逐项确认。") },
-            confirmButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = {
-                    ReminderScheduler.requestIgnoreBatteryOptimizations(context)
-                    dismissController?.dismiss() ?: run { showBatteryDialog = false }
-                }) { Text("去设置") }
-            },
-            dismissButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = { dismissController?.dismiss() ?: run { showBatteryDialog = false } }) { Text("以后再说") }
-            }
-        )
-    }
-
     if (showPermDialog) {
         AlertDialog(
             onDismissRequest = { showPermDialog = false },
@@ -353,6 +329,15 @@ fun SettingsScreen(
                         onClick = { ReminderScheduler.openChannelSettings(context) }
                     )
                     PermRow(
+                        icon = Icons.Filled.Schedule,
+                        title = "精确闹钟",
+                        status = if (permExactAlarm) "已允许" else "未允许",
+                        ok = permExactAlarm,
+                        error = !permExactAlarm,
+                        hint = if (permExactAlarm) "课程提醒可按设定时间触发" else "未允许时仍会提醒，但系统可能延迟",
+                        onClick = { ReminderScheduler.openExactAlarmSettings(context) }
+                    )
+                    PermRow(
                         icon = Icons.Filled.AutoStart,
                         title = "自启动",
                         status = "请确认 →",
@@ -360,15 +345,6 @@ fun SettingsScreen(
                         error = false,
                         hint = "国产系统需要，允许后 App 被杀也能收到提醒",
                         onClick = { ReminderScheduler.openAutoStartSettings(context) }
-                    )
-                    PermRow(
-                        icon = Icons.Filled.BatterySaver,
-                        title = "后台运行（省电）",
-                        status = if (permBattery) "已允许" else "未允许",
-                        ok = permBattery,
-                        error = false,
-                        hint = "部分手机没有此项，找不到可忽略",
-                        onClick = { ReminderScheduler.requestIgnoreBatteryOptimizations(context) }
                     )
                 }
             },
@@ -618,10 +594,9 @@ fun SettingsScreen(
                 )
 
                 // 权限检查（单一入口弹窗）
-                val permIssues = listOf(permNotification, permChannelHigh).count { !it }
+                val permIssues = listOf(permNotification, permChannelHigh, permExactAlarm).count { !it }
                 val permSummary = when {
                     permIssues > 0 -> "$permIssues 项待处理"
-                    !permBattery -> "基本就绪（后台运行未允许，部分手机可忽略）"
                     else -> "全部正常"
                 }
                 SettingItem(

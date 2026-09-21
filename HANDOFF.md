@@ -1,6 +1,6 @@
 # CourseTable 项目交接文档
 
-更新日期：2026-09-15
+更新日期：2026-09-21
 仓库：`https://github.com/liondoge123/CourseTable`
 本地目录：`D:\CourseTable`
 
@@ -16,15 +16,17 @@ CourseTable 是一个单 Activity、Jetpack Compose 实现的 Android 课程表�
 - JSON 备份、ICS 导出、课程提醒及系统权限检查。
 - 浅色/深色主题、五种主题色和 Liquid Glass 交互界面。
 
-业务数据由 Room 与 Preferences DataStore 保存。本次导入升级未修改数据库 Schema、包名或提醒数据结构；扩展的是图片/PDF 的导入层与校对界面，Excel/CSV 未升级。
+业务数据由 Room 与 Preferences DataStore 保存。当前未修改数据库 Schema、包名或提醒数据结构；最近一轮在既有图片/PDF 校对能力上补齐了网络、精确闹钟、系统备份和所有文件导入入口的安全边界。
 
-## 2. 当前已验证正式构建
+## 2. 当前版本与已验证正式构建
 
 `version.properties`：
 
-- `VERSION_NAME = 1.6.1`
-- `VERSION_CODE = 97`
-- `LAST_RELEASE_VERSION = 1.6.1`
+- `VERSION_NAME = 1.6.3`
+- `VERSION_CODE = 113`
+- `LAST_RELEASE_VERSION = 1.6.2`
+
+工作区当前版本是未发布的 `1.6.3`。最近的正式构建仍为 `1.6.2`（versionCode 112）；本轮安全修改只完成了 Preview 验证，没有制作新的正式包，也没有改动上述版本字段。
 
 Android 配置：
 
@@ -37,15 +39,48 @@ Android 配置：
 
 | ABI | 文件 | 字节数 | SHA-256 |
 | --- | --- | ---: | --- |
-| arm64-v8a | `CourseTable-v1.6.1-arm64-v8a-release.apk` | 21,008,811 | `da910f9d6dde7243793009893a8b86c39622adef57e6c7154ec0d27cb08931f2` |
-| armeabi-v7a | `CourseTable-v1.6.1-armeabi-v7a-release.apk` | 19,665,429 | `6f7d538cce08d8724729441ef6197d2833d1f82a14fbcfeb49a0901374828450` |
-| universal | `CourseTable-v1.6.1-universal-release.apk` | 30,127,030 | `1f9682f0632cab7c798f2b998b8ac866d3f221255ab6396b9664f6b518c3b39b` |
+| arm64-v8a | `CourseTable-v1.6.2-arm64-v8a-release.apk` | 21,047,683 | `1c9fda39b05b7b67fc70e3c7e0a368be45f8d409229bec7e75d5fb4187cc82ba` |
+| armeabi-v7a | `CourseTable-v1.6.2-armeabi-v7a-release.apk` | 19,704,305 | `1ec7e6a823edc032e46dd3f68fc29298fa5dd899f7dd0d04858f77d75bbbdf40` |
+| universal | `CourseTable-v1.6.2-universal-release.apk` | 30,165,906 | `1caee1ca122203e29a17aadcdc8c55c1297128296ca3f041a0c29295b9072ce4` |
 
-根目录有当前 arm64-v8a 副本，历史 1.5.8 正式包与 1.5.9 预览包也保留。当前三种包与 `SHA256SUMS.txt` 已在本地验证并交付链接，本次没有上传 GitHub、创建 Tag 或提交代码。旧交接记录中的 GitHub 发布为 `v1.5.8`，不要将本地 `LAST_RELEASE_VERSION` 当作已完成远端发布。
+根目录有 `1.6.1`、`1.6.2` arm64 正式包及较早生成的 `1.6.3` Preview 副本。`1.6.2` 三种正式包与 `SHA256SUMS.txt` 位于 `app/build/outputs/apk/release`，arm64 包已复核包名 `com.coursetable.app`、版本 1.6.2/112、V2 签名和预期证书。不要将本地 `LAST_RELEASE_VERSION` 当作已完成远端发布；本轮没有上传 GitHub、创建 Tag 或提交代码。
 
 用户要求正式 APK **30 MB 左右**，允许小幅超出，不是严格 30,000,000 字节上限。脚本使用 31,500,000 字节（5% 余量）作为增长防护；当前 universal 为约 30.13 MB。三个正式产物都适用此检查。
 
-## 3. v1.5.8 历史主要变更（继续保留）
+## 3. 2026-09-21 安全与兼容性修复（未发布）
+
+### 网络与教务导入
+
+- `AndroidManifest.xml` 不再全局允许明文流量；`res/xml/network_security_config.xml` 默认禁止 HTTP，仅为 `jwxt.ujs.edu.cn` 设置精确域名例外，并只信任系统 CA。
+- 江苏大学入口直接打开 `https://pass.ujs.edu.cn/cas/login`，HTTP 教务地址只作为 CAS 回调和课表接口。登录密码由 HTTPS 页面承载，但课表会话 Cookie 与响应经过 HTTP，仍存在同网段窃取的残余风险，学校提供 HTTPS 前无法彻底消除。
+- `SchoolAdapter` 现在区分 `loginUrl`、`cookieOrigin`、允许导航主机与允许 HTTP 的主机；自定义正方教务登录页仅接受 HTTPS。
+- `EduImportScreen` 禁止 WebView 文件访问、内容访问、混合内容、第三方 Cookie 与多窗口，限制主框架导航域名，显示当前域名/HTTP 风险，退出或成功导入后销毁 WebView 并清理 Cookie、缓存及 Web Storage。
+
+### 精确闹钟与备份
+
+- Manifest 声明 `SCHEDULE_EXACT_ALARM`；设置页增加“精确闹钟”检查和系统授权入口。
+- 课程提醒在授权时用 `setExactAndAllowWhileIdle`，未授权或授权被并发撤销时降级为 `setAndAllowWhileIdle`；测试提醒走同一逻辑，不再直接调用 `setAlarmClock`。
+- 每日重排改用 30 分钟非精确窗口；开机或重新授予精确闹钟权限后重排。已移除 `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 及主动申请白名单流程，它不能替代精确闹钟权限。
+- `allowBackup=false`，并同时提供 Android 12+ `dataExtractionRules` 与旧版 `fullBackupContent` 全排除规则。跨设备迁移只使用应用内 JSON 导出/恢复。
+
+### 文件导入安全边界
+
+- 新增 `importer/ImportPolicy.kt` 和 `DetectedImportType`。外部入口只接受 `content://`，Manifest 移除 `file://`/`BROWSABLE`；优先根据文件签名或文本内容识别格式，不信任扩展名和 MIME。
+- 大小上限：ICS/JSON/CSV 5 MiB、XLSX 20 MiB、图片 25 MiB、PDF 30 MiB；即使 ContentProvider 不报告长度，也由计数流强制限制。
+- PDF 最多 20 页、单页最多 1600 万渲染像素；PDFBox 使用 8 MiB 内存加 128 MiB 临时存储的混合模式。图片源最长边 32,768、总像素不超过 1 亿，实际 OCR 最长边仍降采样到 4096。
+- XLSX 最多 256 个 ZIP 条目、64 MiB 解压总量、单个目标 XML 16 MiB、10,000 行、256 列、100,000 单元格；拒绝 DOCTYPE/ENTITY，禁用外部实体、外部 DTD 和 XInclude，并限制异常单元格坐标。
+- JSON 最多 20 张课表、总计 2,000 门课程；ICS、CSV、OCR/PDF 输出同样最多 2,000 条；课程名称、教师和地点最多 256 字符。图片 EXIF 改用 AndroidX ExifInterface。
+- 解析失败向用户显示稳定的安全错误，不再暴露底层异常类型和消息；所有 PDF/图片临时目录继续在成功、失败和取消时清理。
+
+### 本轮验证
+
+- `:app:testDebugUnitTest`：64 个单元测试通过；新增类型伪造、未知长度超限流、备份上限、XXE、巨大 XLSX 单元格坐标、HTTPS 教务配置和 Manifest/WebView/闹钟安全契约测试。
+- `:app:compileDebugAndroidTestKotlin`：通过；当前无连接设备，因此本轮 instrumentation 只完成编译，未执行 Android 11/12/14 真机或模拟器矩阵。
+- `:app:lintPreview`、`:app:assemblePreview`：通过；Lint 仍有依赖更新、ML Kit 原生库 16 KiB 对齐等既有警告，没有错误。
+- 当前 Gradle Preview 验证产物：`app/build/outputs/apk/preview/CourseTable-v1.6.3-preview-b113-arm64-v8a-preview.apk`，29,638,654 字节，SHA-256 `b8fc7d1b3ea21a0ab459233750832297c8b44bb1d5b47f27136b931648691fd1`。它不是交付包；如需安装测试包，仍须按项目规则运行 `scripts/build-apk.ps1 preview` 重新生成并核验。
+- 合并 Preview Manifest 已复核：`allowBackup=false`、无 `file://`、无忽略电池优化权限、包含 `SCHEDULE_EXACT_ALARM`、全局 `usesCleartextTraffic=false` 并引用域名级网络配置。
+
+## 4. v1.5.8 历史主要变更（继续保留）
 
 ### 根导航与页面结构
 
@@ -70,7 +105,7 @@ Android 配置：
 - 删除动作统一使用垃圾桶语义：第一次进入确认态，第二次执行；不再使用容易误解为“完成”的勾。
 - 课程详情底部仅保留“删除”和“编辑”，两者统一使用 13dp 圆角和图标加文字。
 
-## 4. 关键代码与架构约束
+## 5. 关键代码与架构约束
 
 - `MainActivity.kt`：根导航、五槽底栏和中央添加动作。
 - `ui/liquid/GlassHost.kt`：提供 `LocalGlassBackdrop`、`LocalNavigationGlassBackdrop`、`LocalTopChromeGlassBackdrop`。
@@ -89,7 +124,7 @@ Android 配置：
 5. 普通文字按钮共享 `LiquidButtonShape`；紧凑纯图标操作才使用圆形。
 6. 更新图标时继续从固定版本 Lucide SVG 生成，保留上游名称和许可，不要重新手绘路径。
 
-## 5. 当前验证状态
+## 6. v1.6.1 OCR 正式构建验证记录（历史）
 
 正式构建命令：
 
@@ -114,7 +149,7 @@ Android 配置：
 
 完整最终构建日志：`app/build/logs/release-b97.log`。历史失败或中间构建日志不能替代最终验证。
 
-## 6. 构建与发布
+## 7. 构建与发布
 
 环境：
 
@@ -150,15 +185,18 @@ $env:JAVA_HOME='C:\Users\zhangyuchao\.jdks\jbr-21.0.11'
 $env:JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=D:\CourseTable\.unix-sockets'
 ```
 
-## 7. 后续建议
+## 8. 后续建议
 
+- 在 Android 12、14 及较新版本真机分别测试精确闹钟已授权、拒绝、撤销后的课程提醒和测试提醒，确认授权广播重排与无权限降级均不会崩溃。
+- 实测江苏大学 HTTPS CAS → HTTP 教务回调、Cookie 抓课、异常跨域拦截以及完成/退出后的会话清理；自定义 HTTPS 正方入口如需跨域 SSO，应新增显式学校适配器和主机白名单，不要放宽全局策略。
+- 用文件管理器、QQ/微信分享入口验证 `content://` 的 ICS、JSON、CSV、XLSX、PDF、PNG/JPEG/WebP 正常样本，以及过大、伪造 MIME、权限撤销和损坏文件的错误提示。
 - 在 arm64 真机执行五槽导航、中央添加、导入子页、弹窗、开关拖动、删除确认和深浅色主题视觉回归。
-- 后续普通修复版本从 `1.6.2` 开始；新增兼容功能使用 `1.7.0`。
+- 下一次正式发布至少使用 `1.6.3`/versionCode 113 或更高版本，并严格按 `RELEASE.md` 重新构建和核验；不要把当前 Preview 当作正式包。
 - 非发布开发优先使用编译与单测；仅在需要安装包时运行 Preview，避免无意义递增 `versionCode`。
 - 收集不同学校的周课表、明细表、无线框、合并格、模糊小字与拍照样本，统计课程名、时间/周次和整体导入准确率；一张图拆出 14 条记录不代表任意排版都可靠。
 - 在 ARM 真机测识别耗时、峰值内存、连续导入和多页 PDF；保留校对机制，不承诺所有图片全自动准确识别。
 
-## 8. 本次图片/PDF 导入升级
+## 9. 图片/PDF 导入升级（历史背景）
 
 ### 解析与数据流
 
@@ -190,4 +228,4 @@ $env:JAVA_TOOL_OPTIONS='-Djdk.net.unixdomain.tmpdir=D:\CourseTable\.unix-sockets
 - 原图有 11 门课程、12 个上课安排；“电力电子技术”两次上课，“中国古代史”第 4、9–10、14–16 周，拆分为 14 条记录。
 - 电脑实验脚本：`scripts/benchmark-ocr.py`、`scripts/summarize-ocr-benchmark.py`；Python 环境和检测/方向模型在忽略的 `.cache/ocr-benchmark/`，原始结果在 `app/build/benchmarks/`，不进入 APK。
 - Otsu 对比度实验使识别变差，仅留在 `androidTest`，未启用生产增强；截图及预期数据也仅属测试 assets。
-- 本次工作仍在未提交工作区，没有提交或推送。既有 `SettingsScreen.kt`、`TimetableScreen.kt`、`gradle.properties` 和 `gradle/gradle-daemon-jvm.properties` 相关改动保留；后续提交前先检查完整 diff，避免误删或误归因。
+- 当前工作仍在未提交工作区，没有提交或推送。本轮安全修改与此前已有的 `TimetableScreen.kt`、`ui/liquid/GlassOverlays.kt`、`version.properties` 修改并存；后续提交前必须检查完整 diff，避免误删或把既有修改误归因到安全修复。

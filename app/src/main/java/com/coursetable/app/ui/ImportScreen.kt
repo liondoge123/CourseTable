@@ -61,6 +61,9 @@ import com.coursetable.app.importer.VisualImportSession
 import com.coursetable.app.importer.PreparedImportImage
 import com.coursetable.app.importer.ImageSelection
 import com.coursetable.app.importer.ImageImportPreparation
+import com.coursetable.app.importer.DetectedImportType
+import com.coursetable.app.importer.ImportPolicy
+import com.coursetable.app.importer.ImportRejectedException
 import com.coursetable.app.importer.fieldErrors
 import com.coursetable.app.importer.reviewIssues
 import kotlinx.coroutines.CancellationException
@@ -107,13 +110,6 @@ data class IncomingFile(val uri: Uri, val mimeType: String?) {
         }
     }
 }
-
-private val EXCEL_MIMES = setOf(
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-    "text/csv",
-    "text/comma-separated-values"
-)
 
 internal sealed class ImportPreview {
     data class Ics(val courses: List<Course>, val warnings: List<String>) : ImportPreview()
@@ -207,13 +203,13 @@ fun ImportScreen(
             return
         }
         reviewDirty = false
-        val mime = mimeType ?: context.contentResolver.getType(uri)
-        val path = uri.lastPathSegment.orEmpty().lowercase()
         busy = true
         try {
-            when {
-                mime == "text/calendar" || mime == "text/vcs" || path.endsWith(".ics") -> {
-                    val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            ImportPolicy.requireExternalContentUri(uri)
+            val detected = withContext(Dispatchers.IO) { ImportPolicy.sniff(context, uri, mimeType) }
+            when (detected) {
+                DetectedImportType.ICS -> {
+                    val content = withContext(Dispatchers.IO) { ImportPolicy.readText(context, uri, detected) }
                     if (content.isNullOrBlank()) {
                         toast("文件为空")
                     } else {
@@ -228,8 +224,8 @@ fun ImportScreen(
                         }
                     }
                 }
-                mime == "application/json" || path.endsWith(".json") -> {
-                    val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                DetectedImportType.JSON -> {
+                    val content = withContext(Dispatchers.IO) { ImportPolicy.readText(context, uri, detected) }
                     if (content.isNullOrBlank()) {
                         toast("文件为空")
                     } else {
@@ -242,7 +238,7 @@ fun ImportScreen(
                         }
                     }
                 }
-                mime == "application/pdf" || path.endsWith(".pdf") -> {
+                DetectedImportType.PDF -> {
                     val session = loadImportResource {
                         VisualTimetableImporter.open(context, uri, true, settings)
                     }
@@ -253,7 +249,7 @@ fun ImportScreen(
                     previewPath = session.path
                     overwriteMode = false
                 }
-                mime?.startsWith("image/") == true || path.endsWith(".png") || path.endsWith(".jpg") || path.endsWith(".jpeg") -> {
+                DetectedImportType.IMAGE -> {
                     preparedImage = loadImportResource { ImageImportPreparation.prepare(context, uri) }
                     imageSelection = ImageSelection()
                     selectionError = null
@@ -261,38 +257,30 @@ fun ImportScreen(
                     reviewDirty = false
                     overwriteMode = false
                 }
-                mime in EXCEL_MIMES || path.endsWith(".csv") || path.endsWith(".xlsx") || path.endsWith(".xls") -> {
-                    val bytes = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                DetectedImportType.CSV, DetectedImportType.XLSX -> {
+                    val bytes = withContext(Dispatchers.IO) { ImportPolicy.readBytes(context, uri, detected) }
+                    val result = withContext(Dispatchers.IO) {
+                        if (detected == DetectedImportType.XLSX) ExcelTimetableImporter.parseXlsx(bytes)
+                        else ExcelTimetableImporter.parseCsv(bytes.toString(Charsets.UTF_8))
                     }
-                    if (bytes == null) {
-                        toast("无法读取文件")
+                    if (result.candidates.isEmpty()) {
+                        toast(result.warnings.joinToString("\n").ifBlank { "未能从表格中识别出课程" })
                     } else {
-                        val result = withContext(Dispatchers.IO) {
-                            if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) {
-                                ExcelTimetableImporter.parseXlsx(bytes)
-                            } else {
-                                ExcelTimetableImporter.parseCsv(bytes.toString(Charsets.UTF_8))
-                            }
-                        }
-                        if (result.candidates.isEmpty()) {
-                            toast(result.warnings.joinToString("\n").ifBlank { "未能从表格中识别出课程" })
-                        } else {
-                            reviewCandidates = result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
-                            candidatesEdited = false
-                            pendingPreview = ImportPreview.Pdf(result, "Excel/CSV 表格")
-                            previewPath = "表格解析"
-                            overwriteMode = false
-                        }
+                        reviewCandidates = result.candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
+                        candidatesEdited = false
+                        pendingPreview = ImportPreview.Pdf(result, "Excel/CSV 表格")
+                        previewPath = "表格解析"
+                        overwriteMode = false
                     }
                 }
-                else -> toast("不支持的文件类型")
             }
         } catch (t: CancellationException) {
             throw t
+        } catch (t: ImportRejectedException) {
+            toast(t.message ?: "文件不符合安全导入要求")
         } catch (t: Throwable) {
             android.util.Log.e("CourseTableImport", "Import failed", t)
-            toast("读取失败：${t.javaClass.simpleName} ${t.message}")
+            toast("读取失败，文件可能已损坏或格式不受支持")
         } finally {
             busy = false
         }
@@ -503,7 +491,9 @@ fun ImportScreen(
                     busy = true
                     try {
                         val toImport = reviewCandidates
-                        if (toImport.isNotEmpty() && toImport.all { it.fieldErrors(settings).isEmpty() }) {
+                        if (toImport.size > ImportPolicy.MAX_OUTPUT_COURSES) {
+                            toast("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 门，无法导入")
+                        } else if (toImport.isNotEmpty() && toImport.all { it.fieldErrors(settings).isEmpty() }) {
                             repo.importCourses(settings.timetableId, toImport.map { candidateToCourse(it, settings.timetableId) }, overwriteMode)
                             toast("导入成功：${toImport.size} 条上课记录")
                             flowState.clearDraft()

@@ -379,7 +379,8 @@ private fun TimetableSelector(
                     onClick = {
                         expanded = false
                         onSwitch(table.id)
-                    }
+                    },
+                    selected = table.id == activeId
                 )
             }
         }

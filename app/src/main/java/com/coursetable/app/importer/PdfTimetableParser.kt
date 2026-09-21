@@ -2,8 +2,11 @@ package com.coursetable.app.importer
 
 import com.coursetable.app.data.WeekType
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import java.io.ByteArrayInputStream
+import java.io.File
 
 /**
  * PDF 文字层读取器：用 pdfbox-android 提取带坐标的文字块。
@@ -13,10 +16,25 @@ object PdfTextReader {
 
     fun extract(bytes: ByteArray): List<TextToken> = extractByPage(bytes).flatten()
 
-    fun extractByPage(bytes: ByteArray): List<List<TextToken>> {
+    fun extractByPage(bytes: ByteArray): List<List<TextToken>> = extractByPage {
+        PDDocument.load(
+            ByteArrayInputStream(bytes),
+            MemoryUsageSetting.setupMixed(8L * 1024 * 1024, 128L * 1024 * 1024)
+        )
+    }
+
+    fun extractByPage(file: File): List<List<TextToken>> = extractByPage {
+        PDDocument.load(
+            file,
+            MemoryUsageSetting.setupMixed(8L * 1024 * 1024, 128L * 1024 * 1024)
+        )
+    }
+
+    private inline fun extractByPage(load: () -> PDDocument): List<List<TextToken>> {
         val pages = mutableListOf<List<TextToken>>()
         try {
-            PDDocument.load(bytes).use { doc ->
+            load().use { doc ->
+                if (doc.numberOfPages > ImportPolicy.MAX_PDF_PAGES) return emptyList()
                 for (i in 0 until doc.numberOfPages) {
                     val page = doc.getPage(i)
                     val rotation = page.rotation

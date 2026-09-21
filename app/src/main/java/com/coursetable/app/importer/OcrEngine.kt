@@ -116,11 +116,18 @@ object PdfRendererUtil {
         val warnings = mutableListOf<String>()
         var temporaryFile: java.io.File? = null
         try {
-            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            val pfd = if (uri.scheme == "file") {
+                android.os.ParcelFileDescriptor.open(
+                    java.io.File(uri.path ?: throw ImportRejectedException("PDF 路径无效")),
+                    android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                )
+            } else context.contentResolver.openFileDescriptor(uri, "r")
                 ?: context.contentResolver.openInputStream(uri)?.use { ins ->
                     val tmp = java.io.File(context.cacheDir, "pdf_tmp_${System.currentTimeMillis()}.pdf")
                     temporaryFile = tmp
-                    tmp.outputStream().use { out -> ins.copyTo(out) }
+                    tmp.outputStream().use { out ->
+                        with(ImportPolicy) { ins.copyLimitedTo(out, DetectedImportType.PDF.maxBytes) }
+                    }
                     android.os.ParcelFileDescriptor.open(tmp, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                 } ?: return warnings + "无法打开 PDF 文件"
             try {
@@ -129,11 +136,17 @@ object PdfRendererUtil {
                     if (renderer.pageCount == 0) {
                         warnings.add("PDF 没有任何页面")
                     }
+                    if (renderer.pageCount > ImportPolicy.MAX_PDF_PAGES) {
+                        throw ImportRejectedException("PDF 页数超过 ${ImportPolicy.MAX_PDF_PAGES} 页")
+                    }
                     for (i in 0 until renderer.pageCount) {
                         val page = renderer.openPage(i)
                         try {
                             val width = (page.width * scale).toInt().coerceAtLeast(1)
                             val height = (page.height * scale).toInt().coerceAtLeast(1)
+                            if (width.toLong() * height > ImportPolicy.MAX_RENDER_PIXELS) {
+                                throw ImportRejectedException("PDF 页面尺寸过大")
+                            }
                             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                             bmp.eraseColor(android.graphics.Color.WHITE)
                             val canvas = android.graphics.Canvas(bmp)

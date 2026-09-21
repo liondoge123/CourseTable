@@ -65,6 +65,9 @@ object BackupManager {
 
     fun parse(content: String): BackupData {
         val warnings = mutableListOf<String>()
+        if (content.length > DetectedImportType.JSON.maxBytes) {
+            return BackupData(emptyList(), listOf("备份文件过大"))
+        }
         val root = try {
             JSONObject(content)
         } catch (e: Exception) {
@@ -76,12 +79,17 @@ object BackupManager {
 
         // v2 格式：timetables 数组
         root.optJSONArray("timetables")?.let { arr ->
+            if (arr.length() > ImportPolicy.MAX_TIMETABLES) {
+                return BackupData(emptyList(), warnings + "备份中的课表数量超过 ${ImportPolicy.MAX_TIMETABLES} 个")
+            }
             val result = mutableListOf<TimetableBackup>()
+            var remainingCourses = ImportPolicy.MAX_OUTPUT_COURSES
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val name = o.optString("name").ifBlank { "导入的课表" }
+                val name = bounded(o.optString("name").ifBlank { "导入的课表" })
                 val timetable = parseTimetableMeta(o, name, warnings)
-                val courses = parseCourses(o.optJSONArray("courses"), warnings)
+                val courses = parseCourses(o.optJSONArray("courses"), warnings, remainingCourses)
+                remainingCourses -= courses.size
                 result.add(TimetableBackup(timetable, courses))
             }
             if (result.isEmpty()) warnings.add("备份中没有课表数据")
@@ -114,28 +122,35 @@ object BackupManager {
         )
     }
 
-    private fun parseCourses(arr: JSONArray?, warnings: MutableList<String>): List<Course> {
+    private fun parseCourses(
+        arr: JSONArray?,
+        warnings: MutableList<String>,
+        limit: Int = ImportPolicy.MAX_OUTPUT_COURSES
+    ): List<Course> {
         val courses = mutableListOf<Course>()
         if (arr == null) return courses
-        for (i in 0 until arr.length()) {
+        if (arr.length() > limit) warnings.add("课程数量超过上限，仅保留前 $limit 门")
+        for (i in 0 until minOf(arr.length(), limit)) {
             val o = arr.optJSONObject(i) ?: continue
-            val name = o.optString("name").trim()
+            val name = bounded(o.optString("name").trim())
             if (name.isEmpty()) {
                 warnings.add("跳过一条课程名称为空的记录")
                 continue
             }
+            val startWeek = o.optInt("startWeek", 1).coerceIn(1, 60)
+            val endWeek = o.optInt("endWeek", startWeek).coerceIn(startWeek, 60)
             courses.add(
                 Course(
                     id = 0,
                     name = name,
-                    teacher = o.optString("teacher"),
-                    location = o.optString("location"),
+                    teacher = bounded(o.optString("teacher")),
+                    location = bounded(o.optString("location")),
                     dayOfWeek = o.optInt("dayOfWeek", 1).coerceIn(1, 7),
-                    startSection = o.optInt("startSection", 1),
-                    duration = o.optInt("duration", 1),
-                    startWeek = o.optInt("startWeek", 1),
-                    endWeek = o.optInt("endWeek", 1),
-                    weekType = o.optInt("weekType", 0),
+                    startSection = o.optInt("startSection", 1).coerceIn(1, 30),
+                    duration = o.optInt("duration", 1).coerceIn(1, 30),
+                    startWeek = startWeek,
+                    endWeek = endWeek,
+                    weekType = o.optInt("weekType", 0).coerceIn(0, 2),
                     color = o.optLong("color", 0xFF4B6EAF)
                 )
             )
@@ -177,7 +192,7 @@ object BackupManager {
     private fun parsePeriods(arr: JSONArray?): List<PeriodTime> {
         val result = mutableListOf<PeriodTime>()
         if (arr == null) return result
-        for (i in 0 until arr.length()) {
+        for (i in 0 until minOf(arr.length(), 30)) {
             val token = arr.optString(i).trim()
             val parts = token.split("-")
             if (parts.size != 2) continue
@@ -190,4 +205,6 @@ object BackupManager {
         }
         return result
     }
+
+    private fun bounded(value: String): String = value.take(ImportPolicy.MAX_TEXT_FIELD)
 }

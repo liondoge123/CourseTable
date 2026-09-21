@@ -4,6 +4,9 @@ import com.coursetable.app.data.WeekType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class ExcelTimetableImporterTest {
 
@@ -83,5 +86,30 @@ class ExcelTimetableImporterTest {
         val result = ExcelTimetableImporter.parseCsv("1,2,3")
         assertTrue(result.candidates.isEmpty())
         assertTrue(result.warnings.isNotEmpty())
+    }
+
+    @Test
+    fun xlsxRejectsDoctypeAndExternalEntities() {
+        val malicious = """<!DOCTYPE x [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><worksheet><c r="A1"><v>&xxe;</v></c></worksheet>"""
+        val result = ExcelTimetableImporter.parseXlsx(xlsx(malicious))
+        assertTrue(result.candidates.isEmpty())
+        assertTrue(result.warnings.isNotEmpty())
+    }
+
+    @Test
+    fun hugeCellReferenceDoesNotAllocateHugeGrid() {
+        val sheet = """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row><c r="ZZZZ9999999"><v>1</v></c></row></sheetData></worksheet>"""
+        val result = ExcelTimetableImporter.parseXlsx(xlsx(sheet))
+        assertTrue(result.candidates.isEmpty())
+    }
+
+    private fun xlsx(sheetXml: String): ByteArray {
+        val output = ByteArrayOutputStream()
+        ZipOutputStream(output).use { zip ->
+            zip.putNextEntry(ZipEntry("xl/worksheets/sheet1.xml"))
+            zip.write(sheetXml.toByteArray())
+            zip.closeEntry()
+        }
+        return output.toByteArray()
     }
 }
