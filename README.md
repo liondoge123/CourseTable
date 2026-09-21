@@ -137,6 +137,15 @@ Preview 构建用于快速安装测试，关闭 R8 且只生成 `arm64-v8a`。Re
 
 构建日志位于 `app/build/logs/`，校验和文件位于对应的 `app/build/outputs/apk/{preview|release}/SHA256SUMS.txt`。
 
+## Git 版本管理
+
+项目使用 Git 管理开发和发布版本，便于审查和回退：
+
+- 相关改动使用独立 commit，正式版本创建 `v{versionName}` 标签。
+- 正式发布时同时推送代码和标签：`git push origin main`、`git push origin v{versionName}`。
+- APK 和校验和作为 GitHub Release 附件保存，不提交生成的 APK 到源码历史。
+- 回退前先通过 `git log` 或版本标签确认目标版本；共享分支不使用强制推送改写历史。
+
 ## 安装 APK
 
 正式包可以从 [GitHub Releases](https://github.com/liondoge123/CourseTable/releases) 下载。也可以使用 ADB 安装：
