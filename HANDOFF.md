@@ -5,10 +5,18 @@
 
 ## 当前状态
 
-- 本次工作整理源码和文档，准备后续正式发布；**尚未生成新的正式 APK、创建版本标签或发布 GitHub Release**。
-- `version.properties` 当前为 `VERSION_NAME=1.6.4`、`VERSION_CODE=122`、`LAST_RELEASE_VERSION=1.6.3`。这些字段记录候选源码状态，不能当作已发布 APK 的版本证明。
-- 下一次执行 `scripts/build-apk.ps1 release` 会将 `versionCode` 递增到 123，并按 `RELEASE.md` 校验三种 ABI 的正式包。正式发布后再提交脚本更新的版本文件、创建 `v1.6.4` 标签并上传 Release 资产。
-- `main` 包含 v1.6.3 的源码历史；GitHub Release 页面与 Git 标签是两种独立状态，发布前应分别核对。
+- v1.6.4 正式构建已由 `scripts/build-apk.ps1 release` 生成；安装包与校验和作为 GitHub Release 资产发布，源码提交不包含 APK。
+- `version.properties` 为 `VERSION_NAME=1.6.4`、`VERSION_CODE=123`、`LAST_RELEASE_VERSION=1.6.4`；Git 标签为 `v1.6.4`。仓库 README 不记录易过时的当前版本和构建步骤。
+
+正式产物位于 `app/build/outputs/apk/release`：
+
+| ABI | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| arm64-v8a | 21,064,547 | `3367aa7fe6742c1a1f79f24a7365d28233ec474117dcd17f09c4a502c39d7a0e` |
+| armeabi-v7a | 19,721,169 | `c6f4be34f9217abac6a7d81bdf1875b697952451757cf6d208a1a8f04452a06e` |
+| universal | 30,182,766 | `34bde00e49701619853ad82383d9b0504a52e057c843f21e1e15f11ab0964fab` |
+
+文件名均为 `CourseTable-v1.6.4-{ABI}-release.apk`，校验和文件为同目录的 `SHA256SUMS.txt`。
 
 ## 本轮源码变化
 
@@ -30,15 +38,15 @@
 
 ## 验证与待验证项
 
-- `:app:testDebugUnitTest`：67 个测试通过；`:app:lintDebug` 与 `:app:compileDebugAndroidTestKotlin` 通过。源码提交不代表正式 APK 已通过签名或实体手机验证。
+- 正式构建执行了 `:app:testDebugUnitTest`（67 个测试通过）、`:app:lintDebug`、`:app:compileDebugAndroidTestKotlin`、R8 与资源压缩；脚本复核包名、版本、SDK、ABI、V2 签名证书和三种 APK 的 SHA-256，且均低于 31,500,000 字节阈值。日志在 `app/build/logs/release-b123.log`。
 - 已在 Android 14 `Medium_Phone` 模拟器检查导入确认页筛选标签的实际布局；`UnifiedImportReviewTest` 12 项、`VisualImportReviewTest` 10 项和 `OverlayGlassPresentationTest` 2 项通过。Debug 测试使用只在 Debug 构建中声明的 `FileProvider` 提供 `content://` 样本。截图和临时验证文件保留在本地，不进入源码提交。
-- 正式发布前仍需在 ARM 设备上验证导入、菜单、抽屉、原图手势与提醒；教务登录需要真实学校环境复核。重点检查深浅色、窄屏、键盘弹出以及连续识别/取消后的资源释放。
+- arm64-v8a 正式包已安装到 Android 14 模拟器并成功启动、显示课表。仍需在实体 ARM 设备上验证导入、菜单、抽屉、原图手势与提醒；教务登录需要真实学校环境复核。重点检查深浅色、窄屏、键盘弹出以及连续识别/取消后的资源释放。
 
-## 后续正式发布
+## 后续版本发布
 
 1. 以 [`RELEASE.md`](RELEASE.md) 为准，确认语义版本高于 `LAST_RELEASE_VERSION`，并先核对源码与测试结果。
 2. 使用 `scripts/build-apk.ps1 release` 生成 arm64-v8a、armeabi-v7a 和 universal 正式 APK。脚本会递增 `versionCode`，执行 JVM 测试、Android 测试代码编译、Lint、R8 构建，并检查包名、SDK、版本、ABI、签名及 SHA-256。
 3. 检查三种 APK 均未超过 31,500,000 字节防护阈值，复核 `SHA256SUMS.txt` 与签名证书；不要把本地 Preview 包或 Debug 包当作正式产物。
-4. 提交构建脚本更新的 `version.properties`，创建并推送带注释的 `v1.6.4` 标签，再创建 GitHub Release，上传三种 APK 和校验和文件。APK 与本轮新增的本地 `.artifacts/` 不进入 Git 源码提交；仓库里已有的历史验证截图保持原状。
+4. 提交构建脚本更新的 `version.properties`，创建并推送带注释的 `v{versionName}` 标签，再创建 GitHub Release，上传三种 APK 和校验和文件。APK 与本地新增的 `.artifacts/` 不进入 Git 源码提交；仓库里已有的历史验证截图保持原状。
 
 如发布版本发生变化，以上版本号和对应标签须同步调整。签名配置在忽略的 `keystore.properties` 与 `keystore/`，不得写入文档、日志或提交。
