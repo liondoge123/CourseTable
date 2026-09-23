@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -188,7 +187,7 @@ fun ImportScreen(
     var showEduImport by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(initialEntry == ImportEntry.EDU) }
     var entryHandled by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(false) }
 
-    val imagePreviewOpen = pendingPreview != null && pendingPreview !is ImportPreview.Backup && !choosingImage
+    val imagePreviewOpen = pendingPreview != null && pendingPreview !is ImportPreview.Backup
     LaunchedEffect(showEduImport, imagePreviewOpen) {
         onSubpageChanged(showEduImport || imagePreviewOpen)
     }
@@ -426,13 +425,6 @@ fun ImportScreen(
                     }
                 )
 
-                if (busy) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.size(10.dp))
-                        Text("处理中…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
             }
             }
         }
@@ -440,20 +432,11 @@ fun ImportScreen(
 
     if (preparedImage != null && !choosingImage && pendingPreview == null && (autoRecognizing || selectionError != null)) {
         if (busy || autoRecognizing) {
-            androidx.compose.ui.window.Dialog(
-                onDismissRequest = {},
-                properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
-            ) {
-                Surface(Modifier.fillMaxWidth().testTag("image-recognition-progress"), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.background) {
-                    Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        CircularProgressIndicator(Modifier.size(28.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("正在识别课表…", style = MaterialTheme.typography.titleMedium)
-                            Text("完成后自动显示预览", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
+            GlassProgressDialog(
+                title = "正在识别课表…",
+                message = "完成后自动显示预览",
+                modifier = Modifier.testTag("image-recognition-progress")
+            )
         } else AlertDialog(
             onDismissRequest = { if (!busy) { preparedImage = null; selectionError = null } },
             title = { Text(if (busy || autoRecognizing) "正在识别课表…" else "未能识别课表") },
@@ -466,25 +449,7 @@ fun ImportScreen(
         )
     }
 
-    if (choosingImage) preparedImage?.let { image ->
-        ImportImageSelection(
-            image = image, selection = imageSelection, onSelection = { imageSelection = it },
-            busy = busy, error = selectionError,
-            onDismiss = {
-                choosingImage = false
-                selectionError = null
-                if (pendingPreview == null) {
-                    preparedImage = null
-                    if (initialEntry == ImportEntry.INCOMING) onBack?.invoke()
-                }
-            },
-            onConfirm = {
-                if (!busy) scope.launch { recognizePrepared(image) }
-            }
-        )
-    }
-
-    if (!choosingImage) pendingPreview?.let { preview ->
+    pendingPreview?.let { preview ->
         val confirmImport: () -> Unit = {
                 scope.launch {
                     if (busy) return@launch
@@ -529,6 +494,24 @@ fun ImportScreen(
                     } catch (e: Exception) { toast("恢复失败：${e.message}") }
                     finally { busy = false }
                 }
+            }
+        )
+    }
+
+    if (choosingImage) preparedImage?.let { image ->
+        ImportImageSelection(
+            image = image, selection = imageSelection, onSelection = { imageSelection = it },
+            busy = busy, error = selectionError,
+            onDismiss = {
+                choosingImage = false
+                selectionError = null
+                if (pendingPreview == null) {
+                    preparedImage = null
+                    if (initialEntry == ImportEntry.INCOMING) onBack?.invoke()
+                }
+            },
+            onConfirm = {
+                if (!busy) scope.launch { recognizePrepared(image) }
             }
         )
     }

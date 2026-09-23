@@ -5,9 +5,10 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.asAndroidBitmap
 import com.coursetable.app.data.Timetable
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import android.graphics.Color
-import android.net.Uri
+import androidx.core.content.FileProvider
 import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.LocalActivityResultRegistryOwner
@@ -16,13 +17,17 @@ import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.core.app.ActivityOptionsCompat
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.importer.*
 import com.coursetable.app.ui.*
+import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.CourseTableTheme
 import org.junit.Assert.*
 import org.junit.Rule
@@ -32,6 +37,7 @@ import java.io.File
 class VisualImportReviewTest {
     @get:Rule val compose = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+    private fun contentUri(file: File) = FileProvider.getUriForFile(context, "${context.packageName}.testfiles", file)
     private fun fixture(): VisualImportSession {
         val directory = File(context.cacheDir, "review-test-${java.util.UUID.randomUUID()}").apply { mkdirs() }
         val file = File(directory, "page.png")
@@ -39,6 +45,27 @@ class VisualImportReviewTest {
         return VisualImportSession(directory, listOf(ImportPage(0, file, 600, 400, emptyList()), ImportPage(1, file, 600, 400, emptyList())), PdfParseResult(emptyList(), emptyList(), listOf(ImportRegion("r", 0, .1f, .1f, .9f, .9f, TimetableLayout.UNKNOWN), ImportRegion("s", 1, .1f, .1f, .9f, .9f, TimetableLayout.UNKNOWN))), "test")
     }
     private fun course(name: String, review: Boolean = false) = CandidateCourse(name, dayOfWeek = 1, startSection = 1, duration = 2, startWeek = 1, endWeek = 18, weekType = 0, sourceRegion = "r", needsReview = review)
+
+    @Test fun glassProgressDialogIgnoresOutsideTap() {
+        compose.setContent {
+            CourseTableTheme {
+                LiquidBackdropHost(Modifier.fillMaxSize()) {
+                    LiquidAmbientBackground(Modifier.fillMaxSize().glassBackdropSource())
+                    GlassProgressDialog(
+                        title = "正在识别课表…",
+                        message = "完成后自动显示预览",
+                        modifier = Modifier.testTag("image-recognition-progress")
+                    )
+                }
+            }
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("正在识别课表…").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("正在识别课表…").assertIsDisplayed()
+        compose.onRoot().performTouchInput { click(Offset(center.x, height - 1f)) }
+        compose.onNodeWithText("正在识别课表…").assertIsDisplayed()
+    }
 
     @Test fun listFilteringEditingAddingDeletionAndReselectWarning() {
         val session = fixture()
@@ -56,11 +83,22 @@ class VisualImportReviewTest {
             compose.onNodeWithContentDescription("保存").performClick()
             compose.onNodeWithText("更多").performClick()
             compose.onNodeWithText("添加课程").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("course-editor-page", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("校对课程").assertDoesNotExist()
             compose.onNodeWithContentDescription("取消").performClick()
             compose.onNodeWithText("全部 2").performClick()
             compose.onNodeWithText("更多").performClick()
+            compose.onNodeWithText("查看原图").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("overlay-glass-sheet").assertExists()
+            compose.onNodeWithText("关闭").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("更多").performClick()
             compose.onNodeWithText("调整识别范围").performClick()
             compose.onNodeWithText("重新识别？").assertExists()
+            compose.onNodeWithTag("overlay-glass-sheet").assertExists()
             compose.runOnIdle { assertEquals(0, reselects) }
             compose.onNodeWithText("放弃修改并继续").performClick()
             compose.runOnIdle { assertEquals(1, reselects) }
@@ -75,10 +113,58 @@ class VisualImportReviewTest {
             compose.onNodeWithText("下一个来源").performClick()
             compose.onNodeWithText("2/2").assertExists()
             compose.onNodeWithText("完整原图").performClick()
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-source-image").fetchSemanticsNodes().isNotEmpty() }
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("overlay-glass-sheet").assertExists()
             compose.onNodeWithText("下一页").performClick()
             compose.onAllNodesWithText("2/2").assertCountEquals(2)
-            compose.onNodeWithTag("import-source-image").performTouchInput { swipe(center, center + Offset(20f, 20f)) }
+            compose.onNodeWithTag("import-source-image", useUnmergedTree = true).performTouchInput {
+                down(0, center - Offset(30f, 0f)); down(1, center + Offset(30f, 0f))
+                moveTo(0, center - Offset(60f, 0f)); moveTo(1, center + Offset(60f, 0f))
+                up(0); up(1)
+                swipe(center, center + Offset(20f, 20f))
+            }
+            compose.onNodeWithText("关闭").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("放大片段").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-fragment-image", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("overlay-glass-sheet").assertExists()
+            compose.onNodeWithTag("import-fragment-image", useUnmergedTree = true).performTouchInput {
+                down(0, center - Offset(30f, 0f)); down(1, center + Offset(30f, 0f))
+                moveTo(0, center - Offset(60f, 0f)); moveTo(1, center + Offset(60f, 0f))
+                up(0); up(1)
+                swipe(center, center + Offset(20f, 20f))
+            }
+            compose.onNodeWithText("关闭").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-fragment-image", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("原图对照").assertExists()
+        } finally { session.close() }
+    }
+
+    @Test fun nestedImageViewerKeepsCourseEditorDraft() {
+        val session = fixture()
+        val candidate = course("数学").copy(sourceRegions = setOf("r"), draftId = "draft")
+        try {
+            compose.setContent {
+                CourseTableTheme {
+                    LiquidBackdropHost(Modifier.fillMaxSize()) {
+                        LiquidAmbientBackground(Modifier.fillMaxSize().glassBackdropSource())
+                        VisualImportReview(session, AppSettings(), listOf(candidate), {}, {}, {}, {}, {})
+                    }
+                }
+            }
+            compose.onNodeWithText("数学").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("course-editor-page", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("新教师")
+            compose.onNodeWithText("完整原图").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("关闭").performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-source-image", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("course-editor-page", useUnmergedTree = true).assertExists()
+            compose.onAllNodes(hasSetTextAction())[1].assertTextContains("新教师")
         } finally { session.close() }
     }
 
@@ -93,8 +179,10 @@ class VisualImportReviewTest {
                 var rect by remember { mutableStateOf(selection) }
                 CourseTableTheme { ImportImageSelection(image, rect, { rect = it; selection = it }, { confirms++ }, {}, false, null) }
             }
-            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-selection-image").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("import-selection-image").performTouchInput {
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(10000) { compose.onAllNodesWithTag("import-selection-image", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("overlay-glass-sheet").assertExists()
+            compose.onNodeWithTag("import-selection-image", useUnmergedTree = true).performTouchInput {
                 // The landscape image is fitted by width with 24dp margins.
                 val margin = 24f * context.resources.displayMetrics.density
                 val top = center.y - (width - margin * 2) / 3f
@@ -102,14 +190,14 @@ class VisualImportReviewTest {
             }
             compose.runOnIdle { assertTrue(selection.left > 0f); assertTrue(selection.top > 0f) }
             val beforeMove = selection
-            compose.onNodeWithTag("import-selection-image").performTouchInput { swipe(center, center - Offset(20f, 20f)) }
+            compose.onNodeWithTag("import-selection-image", useUnmergedTree = true).performTouchInput { swipe(center, center - Offset(20f, 20f)) }
             compose.runOnIdle {
                 assertTrue(selection.left < beforeMove.left)
                 assertEquals(beforeMove.right - beforeMove.left, selection.right - selection.left, .0001f)
                 assertEquals(beforeMove.bottom - beforeMove.top, selection.bottom - selection.top, .0001f)
             }
             val cropped = selection
-            compose.onNodeWithTag("import-selection-image").performTouchInput {
+            compose.onNodeWithTag("import-selection-image", useUnmergedTree = true).performTouchInput {
                 down(0, center - Offset(30f, 0f)); down(1, center + Offset(30f, 0f))
                 moveTo(0, center - Offset(60f, 0f)); moveTo(1, center + Offset(60f, 0f))
                 up(0); up(1)
@@ -125,13 +213,17 @@ class VisualImportReviewTest {
     @Test fun incomingImageAutomaticallyRecognizesAndAllowsEmptyResultRetry() {
         val fixture = fixture()
         var recognitions = 0
+        val firstRecognition = CompletableDeferred<Unit>()
         val preparedDirectories = mutableListOf<File>()
+        val subpageStates = mutableListOf<Boolean>()
         try {
             compose.setContent {
                 CourseTableTheme {
-                    ImportScreen(incoming = IncomingFile(Uri.fromFile(fixture.pages.first().image), "image/png"), initialEntry = ImportEntry.INCOMING,
+                    ImportScreen(incoming = IncomingFile(contentUri(fixture.pages.first().image), "image/png"), initialEntry = ImportEntry.INCOMING,
+                        onSubpageChanged = { subpageStates += it },
                         recognizeImage = { _, image, selection, _ ->
                             recognitions++
+                            if (recognitions == 1) firstRecognition.await()
                             preparedDirectories.add(image.directory)
                             val result = if (recognitions == 1) PdfParseResult(emptyList(), emptyList()) else PdfParseResult(listOf(course("数学")), emptyList(), fixture.result.regions)
                             val directory = File(context.cacheDir, "mock-result-${java.util.UUID.randomUUID()}").apply { mkdirs() }
@@ -139,6 +231,9 @@ class VisualImportReviewTest {
                         })
                 }
             }
+            compose.waitUntil(10000) { compose.onAllNodesWithText("正在识别课表…").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("处理中…").assertDoesNotExist()
+            firstRecognition.complete(Unit)
             compose.waitUntil(10000) { compose.onAllNodesWithText("未能识别课表").fetchSemanticsNodes().isNotEmpty() }
             compose.runOnIdle { assertEquals(1, recognitions) }
             compose.onNodeWithTag("import-selection-image").assertDoesNotExist()
@@ -147,11 +242,15 @@ class VisualImportReviewTest {
             compose.runOnIdle { assertEquals(2, recognitions) }
             compose.onNodeWithText("更多").performClick()
             compose.onNodeWithText("调整识别范围").performClick()
-            compose.onNodeWithText("返回").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("import-selection-page", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("课程数据导入").assertDoesNotExist()
+            compose.runOnIdle { assertTrue(subpageStates.last()) }
+            compose.onAllNodesWithText("返回").onLast().performClick()
             compose.onNodeWithText("导入确认").assertExists()
             compose.onNodeWithText("返回").performClick()
             compose.waitUntil(10000) { preparedDirectories.all { !it.exists() } }
-        } finally { fixture.close() }
+        } finally { firstRecognition.complete(Unit); fixture.close() }
     }
     @Test fun filePickerImageAlsoRecognizesAutomatically() {
         val fixture = fixture()
@@ -161,7 +260,7 @@ class VisualImportReviewTest {
             override val activityResultRegistry = object : ActivityResultRegistry() {
                 override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>, input: I, options: ActivityOptionsCompat?) {
                     launches++
-                    dispatchResult(requestCode, Activity.RESULT_OK, Intent().setData(Uri.fromFile(fixture.pages.first().image)))
+                    dispatchResult(requestCode, Activity.RESULT_OK, Intent().setData(contentUri(fixture.pages.first().image)))
                 }
             }
         }
@@ -200,8 +299,12 @@ class VisualImportReviewTest {
             compose.onNodeWithText("导入 2 条记录").assertIsEnabled()
             compose.onNodeWithText("查看待确认列表").assertDoesNotExist()
             compose.onNodeWithText("更多").performClick()
-            compose.onNodeWithText("更多操作").assertExists()
-            compose.onAllNodesWithText("关闭").onLast().performClick()
+            compose.onNodeWithText("添加课程").assertExists()
+            compose.onNodeWithText("查看原图").assertExists()
+            compose.onNodeWithText("调整识别范围").assertDoesNotExist()
+            compose.onNodeWithText("更多操作").assertDoesNotExist()
+            compose.onRoot().performTouchInput { click(Offset(center.x, height - 1f)) }
+            compose.onNodeWithText("添加课程").assertDoesNotExist()
             compose.onNodeWithText("开始校对").performClick()
             compose.onNodeWithContentDescription("保存").performClick()
             compose.onNodeWithText("导入 2 条记录").assertIsEnabled()
@@ -248,7 +351,7 @@ class VisualImportReviewTest {
         try {
             compose.setContent {
                 CourseTableTheme {
-                    ImportScreen(incoming = IncomingFile(Uri.fromFile(file), "image/jpeg"), recognizeImage = { _, image, selection, _ ->
+                    ImportScreen(incoming = IncomingFile(contentUri(file), "image/jpeg"), recognizeImage = { _, image, selection, _ ->
                         val resultDirectory = File(context.cacheDir, "integration-result-${java.util.UUID.randomUUID()}").apply { mkdirs() }
                         val output = File(resultDirectory, "page.jpg"); file.copyTo(output)
                         val region = ImportRegion("r", 0, 0f, .08f, 1f, .16f, TimetableLayout.UNKNOWN)

@@ -32,9 +32,12 @@ enum class GlassStyle { CHROME, CONTROL, OVERLAY }
 
 internal enum class OverlayDestination { SHEET, DIALOG, MENU }
 
+private const val OverlaySceneDepth = 8
+
 internal val LocalGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 internal val LocalNavigationGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 internal val LocalTopChromeGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
+internal val LocalOverlayGlassBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 internal val LocalGlassCapability = staticCompositionLocalOf { GlassCapability.STATIC }
 
 internal class GlassOverlayEntry(
@@ -87,16 +90,63 @@ fun LiquidBackdropHost(
         LocalGlassOverlayController provides overlays
     ) {
         Box(modifier) {
-            Box(
-                if (overlays.entries.isNotEmpty()) {
-                    Modifier.fillMaxSize().clearAndSetSemantics { }
-                } else {
-                    Modifier.fillMaxSize()
-                },
-                content = content
+            OverlaySceneStack(
+                entries = overlays.entries,
+                level = OverlaySceneDepth - 1,
+                baseContent = {
+                    Box(
+                        if (overlays.entries.isNotEmpty()) {
+                            Modifier.fillMaxSize().clearAndSetSemantics { }
+                        } else {
+                            Modifier.fillMaxSize()
+                        },
+                        content = content
+                    )
+                }
             )
-            overlays.entries.forEach { entry ->
-                key(entry.id) { entry.content() }
+        }
+    }
+}
+
+/**
+ * Records every presentation level separately. Each overlay samples the complete scene below
+ * it while remaining outside its own recorder, so nested dialogs include their presenting sheet.
+ */
+@Composable
+private fun BoxScope.OverlaySceneStack(
+    entries: List<GlassOverlayEntry>,
+    level: Int,
+    baseContent: @Composable BoxScope.() -> Unit
+) {
+    if (level < 0) {
+        baseContent()
+        return
+    }
+
+    // Keep this hierarchy mounted even when no overlays are visible. Moving the base content to
+    // a different slot would dispose and recreate its portal registrations on every presentation.
+    val sceneBackdrop = rememberLayerBackdrop()
+    val recordsThisLevel = entries.size > level
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                if (recordsThisLevel) {
+                    Modifier
+                        .layerBackdrop(sceneBackdrop)
+                        .clearAndSetSemantics { }
+                } else {
+                    Modifier
+                }
+            )
+    ) {
+        OverlaySceneStack(entries, level - 1, baseContent)
+    }
+
+    entries.getOrNull(level)?.let { entry ->
+        key(entry.id) {
+            CompositionLocalProvider(LocalOverlayGlassBackdrop provides sceneBackdrop) {
+                entry.content()
             }
         }
     }

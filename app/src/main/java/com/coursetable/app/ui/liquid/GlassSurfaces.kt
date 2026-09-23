@@ -14,10 +14,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.theme.LiquidTheme
@@ -36,6 +38,8 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.tanh
+
+internal enum class OverlayGlassStyle { SHEET, DIALOG, MENU }
 
 @Composable
 fun GlassSurface(
@@ -108,48 +112,148 @@ internal fun OverlayGlassSurface(
     baseColor: Color? = null,
     contentColor: Color = LiquidTheme.colorScheme.onSurface,
     shadowElevation: Dp = 20.dp,
+    style: OverlayGlassStyle = OverlayGlassStyle.DIALOG,
     content: @Composable () -> Unit
 ) {
-    val backdrop = LocalGlassBackdrop.current
+    val backdrop = LocalOverlayGlassBackdrop.current ?: LocalGlassBackdrop.current
     val capability = LocalGlassCapability.current
-    val isLightTheme = !LiquidTheme.colorScheme.isDark
-    val libraryContainerColor = baseColor ?: if (isLightTheme) {
-        Color(0xFFFAFAFA).copy(alpha = 0.60f)
-    } else {
-        Color(0xFF121212).copy(alpha = 0.40f)
+    val colors = LiquidTheme.colorScheme
+    val isLightTheme = !colors.isDark
+    val requestedTint = baseColor ?: if (isLightTheme) Color(0xFFFAFAFA) else Color(0xFF121212)
+    val liveAlpha = when (style) {
+        OverlayGlassStyle.SHEET -> if (isLightTheme) 0.50f else 0.44f
+        OverlayGlassStyle.DIALOG -> if (isLightTheme) 0.26f else 0.23f
+        OverlayGlassStyle.MENU -> if (isLightTheme) 0.30f else 0.26f
     }
+    val blurRadius = when (style) {
+        OverlayGlassStyle.SHEET -> 32.dp
+        OverlayGlassStyle.DIALOG -> 22.dp
+        OverlayGlassStyle.MENU -> 18.dp
+    }
+    val refractionHeight = when (style) {
+        OverlayGlassStyle.SHEET -> 8.dp
+        OverlayGlassStyle.DIALOG -> 18.dp
+        OverlayGlassStyle.MENU -> 12.dp
+    }
+    val refractionAmount = when (style) {
+        OverlayGlassStyle.SHEET -> 12.dp
+        OverlayGlassStyle.DIALOG -> 30.dp
+        OverlayGlassStyle.MENU -> 18.dp
+    }
+    val liveTint = requestedTint.copy(alpha = liveAlpha)
+    val liveSheen = Color.White.copy(alpha = if (isLightTheme) 0.14f else 0.055f)
+    val lowerTint = liveTint.copy(alpha = liveAlpha * 0.88f)
+    val fallbackTint = requestedTint.copy(alpha = if (isLightTheme) 0.86f else 0.88f)
+    val fallbackSheen = Color.White.copy(alpha = if (isLightTheme) 0.34f else 0.09f)
 
-    // Keep this material in sync with AndroidLiquidGlass' DialogContent sample.
+    // A single readable liquid-glass material for dialogs, sheets and menus.
     val surfaceModifier = if (backdrop != null && capability != GlassCapability.STATIC) {
-        modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                colorControls(
-                    brightness = if (isLightTheme) 0.20f else 0f,
-                    saturation = 1.5f
-                )
-                blur(if (isLightTheme) 16.dp.toPx() else 8.dp.toPx())
-                if (capability == GlassCapability.FULL) {
-                    lens(
-                        refractionHeight = 24.dp.toPx(),
-                        refractionAmount = 48.dp.toPx(),
-                        depthEffect = true
+        modifier
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { shape },
+                effects = {
+                    colorControls(
+                        brightness = if (isLightTheme) 0.035f else 0f,
+                        saturation = if (isLightTheme) 1.18f else 1.12f
                     )
+                    blur(blurRadius.toPx())
+                    if (capability == GlassCapability.FULL && style != OverlayGlassStyle.SHEET) {
+                        lens(
+                            refractionHeight = refractionHeight.toPx(),
+                            refractionAmount = refractionAmount.toPx(),
+                            depthEffect = true
+                        )
+                    }
+                },
+                highlight = {
+                    Highlight.Default.copy(alpha = if (isLightTheme) 0.58f else 0.34f)
+                },
+                shadow = {
+                    Shadow(
+                        radius = shadowElevation,
+                        color = if (shadowElevation == 0.dp) Color.Transparent else Color.Black.copy(alpha = if (isLightTheme) 0.14f else 0.34f)
+                    )
+                },
+                innerShadow = {
+                    InnerShadow(
+                        radius = 3.dp,
+                        alpha = if (isLightTheme) 0.12f else 0.22f
+                    )
+                },
+                onDrawSurface = {
+                    if (style == OverlayGlassStyle.SHEET) {
+                        // Keep the material equally frosted through the bottom safe area and
+                        // around the rim; the sheen adds light without thinning the tint.
+                        drawRect(liveTint)
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                listOf(liveSheen, Color.Transparent, Color.Transparent)
+                            )
+                        )
+                    } else {
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                listOf(liveSheen, liveTint, liveTint, lowerTint)
+                            )
+                        )
+                    }
                 }
-            },
-            highlight = { Highlight.Plain },
-            onDrawSurface = { drawRect(libraryContainerColor) }
-        )
+            )
+            .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     } else {
         modifier
             .shadow(shadowElevation, shape, clip = false)
             .clip(shape)
-            .background(libraryContainerColor)
+            .background(
+                Brush.verticalGradient(
+                    listOf(fallbackSheen, fallbackTint, fallbackTint)
+                )
+            )
+            .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     }
 
     CompositionLocalProvider(LocalContentColor provides contentColor) {
-        Box(surfaceModifier) { content() }
+        Box(surfaceModifier.testTag("overlay-glass-${style.name.lowercase()}")) {
+            if (style == OverlayGlassStyle.SHEET && backdrop != null && capability != GlassCapability.STATIC) {
+                val edgeColor = requestedTint.copy(alpha = if (isLightTheme) 0.88f else 0.78f)
+                val clearEdge = requestedTint.copy(alpha = 0f)
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(shape)
+                        .drawWithCache {
+                            val solidEdgeWidth = 24.dp.toPx()
+                            val fadeEdgeWidth = 64.dp.toPx()
+                            val xSolid = (solidEdgeWidth / size.width).coerceIn(0f, 0.5f)
+                            val xClear = (fadeEdgeWidth / size.width).coerceIn(xSolid, 0.5f)
+                            val ySolid = (solidEdgeWidth / size.height).coerceIn(0f, 0.5f)
+                            val yClear = (fadeEdgeWidth / size.height).coerceIn(ySolid, 0.5f)
+                            val horizontalVeil = Brush.horizontalGradient(
+                                0f to edgeColor,
+                                xSolid to edgeColor,
+                                xClear to clearEdge,
+                                (1f - xClear) to clearEdge,
+                                (1f - xSolid) to edgeColor,
+                                1f to edgeColor
+                            )
+                            val verticalVeil = Brush.verticalGradient(
+                                0f to edgeColor,
+                                ySolid to edgeColor,
+                                yClear to clearEdge,
+                                (1f - yClear) to clearEdge,
+                                (1f - ySolid) to edgeColor,
+                                1f to edgeColor
+                            )
+                            onDrawBehind {
+                                drawRect(horizontalVeil)
+                                drawRect(verticalVeil)
+                            }
+                        }
+                )
+            }
+            content()
+        }
     }
 }
 

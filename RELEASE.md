@@ -16,12 +16,7 @@ Use Git as the source of truth for every feature and release so that changes can
 
 - Commit related changes in focused commits before building a release.
 - Create an annotated tag named `v{versionName}` for every formal release.
-- Push the release commit and tag together:
-
-```powershell
-git push origin main
-git push origin v1.6.3
-```
+- After the formal build, commit the script-updated version file, create the annotated `v{versionName}` tag on that commit, and push `main` and the tag. Replace `{versionName}` with the version actually verified in the APKs.
 
 - Keep APKs and checksums as GitHub Release assets; do not add generated APKs to source commits.
 - To roll back code, inspect `git log` and recover a known-good tag or revert the problematic commit. Do not rewrite shared history with force-pushes.

@@ -13,15 +13,12 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.coursetable.app.importer.*
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.LiquidTheme
@@ -146,11 +143,11 @@ internal fun ImportImageViewport(bitmap: Bitmap, modifier: Modifier, selection: 
 fun ImportImageSelection(image: PreparedImportImage, selection: ImageSelection, onSelection: (ImageSelection) -> Unit, onConfirm: () -> Unit, onDismiss: () -> Unit, busy: Boolean, error: String?) {
     var resetKey by remember { mutableIntStateOf(0) }
     val bitmap = rememberReviewBitmap(image.preview)
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize().testTag("import-selection-page"), shape = RectangleShape, color = LiquidTheme.colorScheme.background.copy(alpha = 1f)) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+    ModalBottomSheet(onDismissRequest = onDismiss, canDismiss = { !busy }) {
+        val dismissController = LocalDialogDismissController.current
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.82f).testTag("import-selection-page")) {
                 PageHeader("识别范围", "框住完整课表，请保留表头、星期、节次和周次信息") {
-                    TextButton(onClick = onDismiss, enabled = !busy) { Text("返回") }
+                    TextButton(onClick = { dismissController?.dismiss() ?: onDismiss() }, enabled = !busy) { Text("返回") }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                     if (bitmap != null && !bitmap.isRecycled) ImportImageViewport(bitmap, Modifier.fillMaxSize().testTag("import-selection-image"), selection, onSelection, !busy, resetKey)
@@ -165,6 +162,5 @@ fun ImportImageSelection(image: PreparedImportImage, selection: ImageSelection, 
                     }
                 }
             }
-        }
     }
 }

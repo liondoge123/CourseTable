@@ -1,25 +1,23 @@
 package com.coursetable.app.ui
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.importer.*
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.LiquidTheme
+import com.kyant.shapes.RoundedRectangle
 import java.io.File
 
 @Composable
@@ -30,24 +28,51 @@ fun VisualImportReview(session: VisualImportSession, settings: AppSettings, cand
 private fun VisualImportSession.originalFiles(): List<File> = sourceImage?.let { listOf(it.preview) } ?: pages.map { it.image }
 
 @Composable
-internal fun ImportSourceViewer(files: List<File>, title: String, onDismiss: () -> Unit) {
-    var page by remember(files) { mutableIntStateOf(0) }
-    val bitmap = files.getOrNull(page)?.let { rememberReviewBitmap(it) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), shape = RectangleShape, color = LiquidTheme.colorScheme.background.copy(alpha = 1f)) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                PageHeader(title, "双指缩放，拖动查看") { TextButton(onClick = onDismiss) { Text("关闭") } }
-                if (files.size > 1) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { page-- }, enabled = page > 0) { Text("上一页") }
-                    Text("${page + 1}/${files.size}")
-                    TextButton(onClick = { page++ }, enabled = page < files.lastIndex) { Text("下一页") }
-                }
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    if (bitmap != null && !bitmap.isRecycled) ImportImageViewport(bitmap, Modifier.fillMaxSize().testTag("import-source-image")) else Text("正在读取来源图片…")
-                }
+private fun ImportImageViewerSheet(
+    bitmap: Bitmap?,
+    title: String,
+    imageTag: String,
+    onDismiss: () -> Unit,
+    pageCount: Int = 1,
+    pageIndex: Int = 0,
+    onPageChange: (Int) -> Unit = {}
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        val dismissController = LocalDialogDismissController.current
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.82f)) {
+            PageHeader(title, "双指缩放，拖动查看") {
+                TextButton(onClick = { dismissController?.dismiss() ?: onDismiss() }) { Text("关闭") }
+            }
+            if (pageCount > 1) Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { onPageChange(pageIndex - 1) }, enabled = pageIndex > 0) { Text("上一页") }
+                Text("${pageIndex + 1}/$pageCount")
+                TextButton(onClick = { onPageChange(pageIndex + 1) }, enabled = pageIndex < pageCount - 1) { Text("下一页") }
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                    .clip(RoundedRectangle(20.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (bitmap != null && !bitmap.isRecycled) {
+                    ImportImageViewport(bitmap, Modifier.fillMaxSize().testTag(imageTag))
+                } else Text("正在读取来源图片…")
             }
         }
     }
+}
+
+@Composable
+internal fun ImportSourceViewer(files: List<File>, title: String, onDismiss: () -> Unit) {
+    var page by remember(files) { mutableIntStateOf(0) }
+    val bitmap = files.getOrNull(page)?.let { rememberReviewBitmap(it) }
+    ImportImageViewerSheet(bitmap, title, "import-source-image", onDismiss, files.size, page) { page = it }
 }
 
 @Composable
@@ -59,6 +84,7 @@ internal fun ImportCourseSource(session: VisualImportSession, candidate: Candida
     var enlarged by remember { mutableStateOf(false) }
     val region = regions.getOrNull(selected)
     val page = session.pages.firstOrNull { it.index == region?.page }
+    val regionBitmap = if (page != null && region != null) rememberReviewBitmap(page.image, region) else null
     FormSectionCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -79,11 +105,10 @@ internal fun ImportCourseSource(session: VisualImportSession, candidate: Candida
                 TextButton(onClick = { selected++ }, enabled = selected < regions.lastIndex) { Text("下一个来源") }
             }
             if (page != null && region != null) {
-                val bitmap = rememberReviewBitmap(page.image, region)
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val imageHeight = if (compact && bitmap != null) (maxWidth * bitmap.height / bitmap.width.coerceAtLeast(1)).coerceIn(32.dp, if (keyboardVisible) 48.dp else 96.dp) else if (compact) 48.dp else 160.dp
+                val imageHeight = if (compact && regionBitmap != null) (maxWidth * regionBitmap.height / regionBitmap.width.coerceAtLeast(1)).coerceIn(32.dp, if (keyboardVisible) 48.dp else 96.dp) else if (compact) 48.dp else 160.dp
                 Box(Modifier.fillMaxWidth().height(imageHeight).clickable { enlarged = true }, contentAlignment = Alignment.Center) {
-                    if (bitmap != null && !bitmap.isRecycled) androidx.compose.foundation.Image(bitmap.asImageBitmap(), "对应原图片段，点击放大", Modifier.fillMaxSize()) else CircularProgressIndicator(Modifier.size(22.dp))
+                    if (regionBitmap != null && !regionBitmap.isRecycled) androidx.compose.foundation.Image(regionBitmap.asImageBitmap(), "对应原图片段，点击放大", Modifier.fillMaxSize()) else CircularProgressIndicator(Modifier.size(22.dp))
                 }
                 }
                 if (!compact) TextButton(onClick = { enlarged = true }) { Text("放大片段") }
@@ -93,14 +118,6 @@ internal fun ImportCourseSource(session: VisualImportSession, candidate: Candida
     }
     if (full) ImportSourceViewer(session.originalFiles(), "完整原图", { full = false })
     if (enlarged && page != null && region != null) {
-        val bitmap = rememberReviewBitmap(page.image, region)
-        Dialog(onDismissRequest = { enlarged = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(Modifier.fillMaxSize(), shape = RectangleShape, color = LiquidTheme.colorScheme.background.copy(alpha = 1f)) {
-                Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                    PageHeader("原图片段", "双指缩放，拖动查看") { TextButton(onClick = { enlarged = false }) { Text("关闭") } }
-                    if (bitmap != null && !bitmap.isRecycled) ImportImageViewport(bitmap, Modifier.fillMaxWidth().weight(1f))
-                }
-            }
-        }
+        ImportImageViewerSheet(regionBitmap, "原图片段", "import-fragment-image", { enlarged = false })
     }
 }

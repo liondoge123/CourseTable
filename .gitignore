@@ -1,5 +1,6 @@
 .gradle/
 .cache/
+.artifacts/
 __pycache__/
 .kotlin/
 build/

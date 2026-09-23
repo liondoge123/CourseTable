@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
@@ -17,7 +19,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
-import android.net.Uri
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 
@@ -28,11 +30,11 @@ class UnifiedImportReviewTest {
         CandidateCourse("大学英语", location = "B302", dayOfWeek = 3, startSection = 3, duration = 2, startWeek = 1, endWeek = 16, weekType = 1, needsReview = true, draftId = "english"),
         CandidateCourse("物理实验", dayOfWeek = 5, startSection = 5, duration = 5, startWeek = 2, endWeek = 16, weekType = 2, draftId = "physics")
     )
-    private fun show(initial: List<CandidateCourse>, dark: Boolean = false, confirm: (Boolean) -> Unit = {}) {
+    private fun show(initial: List<CandidateCourse>, dark: Boolean = false, confirm: (Boolean) -> Unit = {}, width: Dp? = null) {
         compose.setContent {
             var records by remember { mutableStateOf(initial) }
             CourseTableTheme(themeMode = if(dark) ThemeMode.DARK else ThemeMode.LIGHT) {
-                LiquidBackdropHost(Modifier.fillMaxSize()) {
+                LiquidBackdropHost(if (width == null) Modifier.fillMaxSize() else Modifier.width(width).fillMaxHeight()) {
                     LiquidAmbientBackground(Modifier.fillMaxSize().glassBackdropSource())
                     UnifiedImportReview(null, AppSettings(), records, "Excel/CSV 表格", emptyList(), { records = it }, {}, confirm, false, true, null)
                 }
@@ -49,6 +51,10 @@ class UnifiedImportReviewTest {
         var imported = false
         show(sample(), confirm = { imported = true })
         compose.onNodeWithText("导入确认").assertIsDisplayed()
+        compose.onNodeWithText("Excel/CSV 表格").assertIsDisplayed()
+        compose.onNodeWithText("Excel/CSV 表格 · 3 条上课记录").assertDoesNotExist()
+        compose.onNodeWithText("全部 3").assertExists()
+        compose.onNodeWithText("需修正 0").assertDoesNotExist()
         screenshot("light-preview")
         compose.onNodeWithText("建议确认 1", useUnmergedTree = true).performClick()
         compose.onNodeWithText("大学英语").assertIsDisplayed()
@@ -68,7 +74,8 @@ class UnifiedImportReviewTest {
         compose.onNodeWithText("大学英语").assertExists()
         screenshot("light-editor")
         compose.onNodeWithText("保存并校对下一条").performClick()
-        compose.onNodeWithText("✓ 校对完成").assertExists()
+        compose.onNodeWithText("开始校对").assertDoesNotExist()
+        compose.onNodeWithText("建议确认 1").assertDoesNotExist()
         compose.onNodeWithText("导入 3 条记录").assertIsEnabled()
     }
     @Test fun darkPreviewAndOverwriteConfirmation() {
@@ -93,8 +100,32 @@ class UnifiedImportReviewTest {
         val destination = compose.onNodeWithText("追加 ▾", substring = true).fetchSemanticsNode().boundsInRoot
         val action = compose.onNodeWithText("导入 3 条记录").fetchSemanticsNode().boundsInRoot
         assertTrue(kotlin.math.abs(destination.center.y - action.center.y) < 2f)
-        compose.onNodeWithTag("review-summary-bar", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("review-summary-bar", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("review-import-bar", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun narrowReviewHidesZeroCountsAndResetsClearedFilter() {
+        show(sample().map { if (it.draftId == "math") it.copy(name = "") else it }, width = 320.dp)
+        compose.onNodeWithText("全部 3").assertIsDisplayed()
+        compose.onNodeWithText("需修正 1").assertIsDisplayed()
+        compose.onNodeWithText("建议确认 1").assertIsDisplayed()
+        compose.onNodeWithText("开始校对").assertIsDisplayed()
+        compose.onNodeWithText("需修正 1").performClick()
+        compose.onNodeWithText("课程名称待补齐").performClick()
+        compose.onNodeWithText("课程名称 *").performTextInput("高等数学")
+        compose.onNodeWithContentDescription("保存").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("高等数学").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("需修正 1").assertDoesNotExist()
+        compose.onNodeWithText("全部 3").assertIsDisplayed()
+    }
+
+    @Test fun reviewWithNoIssuesShowsOnlyAllFilter() {
+        show(sample().map { it.copy(needsReview = false) })
+        compose.onNodeWithText("全部 3").assertIsDisplayed()
+        compose.onNodeWithText("需修正 0").assertDoesNotExist()
+        compose.onNodeWithText("建议确认 0").assertDoesNotExist()
+        compose.onNodeWithText("开始校对").assertDoesNotExist()
+        compose.onNodeWithText("导入 3 条记录").assertIsEnabled()
     }
 
     @Test fun previewDisplaysEveryOverlappingCourse() {
@@ -173,9 +204,10 @@ class UnifiedImportReviewTest {
         }
         val source = File(context.cacheDir, "unified-test.${if(ics) "ics" else "csv"}")
         source.writeText(if(ics) "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:review\nSUMMARY:导入测试\nDTSTART:20260902T080000\nDTEND:20260902T094000\nEND:VEVENT\nEND:VCALENDAR" else "课程名称,星期,开始节数,结束节数,老师,地点,周数\n导入测试,1,1,2,教师,A201,1-16")
+        val sourceUri = FileProvider.getUriForFile(context, "${context.packageName}.testfiles", source)
         try {
             compose.setContent { CourseTableTheme { LiquidBackdropHost(Modifier.fillMaxSize()) {
-                ImportScreen(incoming = IncomingFile(Uri.fromFile(source), if(ics) "text/calendar" else "text/csv"))
+                ImportScreen(incoming = IncomingFile(sourceUri, if(ics) "text/calendar" else "text/csv"))
             } } }
             compose.waitUntil(10000) { compose.onAllNodesWithText("导入确认").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("导入测试").assertExists()

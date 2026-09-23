@@ -44,11 +44,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -332,12 +335,15 @@ private fun TimetableSelector(
     onSwitch: (Long) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val active = timetables.firstOrNull { it.id == activeId } ?: timetables.firstOrNull()
     val colors = MaterialTheme.colorScheme
 
     Box {
         LiquidCapsuleSurface(
-            modifier = Modifier.height(36.dp),
+            modifier = Modifier
+                .height(36.dp)
+                .onGloballyPositioned { anchorBounds = it.boundsInRoot() },
             onClick = { expanded = true },
             preferTopChromeBackdrop = true
         ) {
@@ -366,7 +372,9 @@ private fun TimetableSelector(
         }
         DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onDismissRequest = { expanded = false },
+            anchorBounds = anchorBounds,
+            alignment = DropdownMenuAlignment.START
         ) {
             timetables.forEach { table ->
                 DropdownMenuItem(

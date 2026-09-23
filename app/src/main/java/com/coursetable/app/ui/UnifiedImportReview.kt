@@ -14,6 +14,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +33,7 @@ internal fun reviewQueue(courses: List<CandidateCourse>, settings: AppSettings) 
         .sortedBy { if (it.fieldErrors(settings).isNotEmpty()) 0 else 1 }
 
 internal data class ReviewCourseGroup(val label: String, val courses: List<CandidateCourse>)
+private enum class ReviewMoreAction { ADD, ORIGINAL, RESELECT }
 
 internal fun groupedReviewCourses(courses: List<CandidateCourse>, settings: AppSettings): List<ReviewCourseGroup> {
     val order = compareBy<CandidateCourse>({ it.startSection }, { it.duration }, { it.name }, { it.draftId.orEmpty() })
@@ -136,15 +140,22 @@ internal fun UnifiedImportReview(
     val adding = addingId?.let { CandidateCourse("", dayOfWeek = 1, startSection = 1, duration = 1, startWeek = 1, endWeek = settings.totalWeeks, weekType = 0, draftId = it) }
     var queue by rememberSaveable { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
+    var pendingMoreAction by remember { mutableStateOf<ReviewMoreAction?>(null) }
+    var moreAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var original by remember { mutableStateOf(false) }
     var reselect by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
     var overwrite by rememberSaveable { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var deleted by remember { mutableStateOf<Pair<Int, CandidateCourse>?>(null) }
-    var completed by remember { mutableStateOf(false) }
     val errors = candidates.count { it.fieldErrors(settings).isNotEmpty() }
     val suggestions = candidates.count { it.fieldErrors(settings).isEmpty() && it.needsReview }
+    val activeFilter = when {
+        filter == 1 && errors == 0 -> 0
+        filter == 2 && suggestions == 0 -> 0
+        else -> filter
+    }
+    LaunchedEffect(activeFilter, filter) { if (filter != activeFilter) filter = activeFilter }
     fun dismiss() { if (!saving) { if (hasEdits) leave = true else onDismiss() } }
     fun startQueue() { queue = true; selected = reviewQueue(candidates, settings).firstOrNull()?.draftId }
     fun update(c: CandidateCourse, replacement: CandidateCourse?) {
@@ -154,12 +165,11 @@ internal fun UnifiedImportReview(
         if (replacement == null) { deleted = index to c; next.removeAt(index) } else next[index] = replacement
         onCandidates(next)
         selected = if (queue) reviewQueue(next, settings).firstOrNull()?.draftId else null
-        completed = queue && selected == null
     }
     val editing = adding ?: candidates.firstOrNull { it.draftId != null && it.draftId == selected }
     val editor: @Composable (Boolean) -> Unit = { embedded -> editing?.let { c -> key(c.draftId) {
-        CourseEditorDialog(course = candidateToCourse(c, settings.timetableId), totalWeeks = settings.totalWeeks, periodCount = settings.periods.size.coerceAtLeast(1), title = "校对课程", embedded = embedded, protectEdits = true, reviewHints = c.fieldErrors(settings), saveLabel = if(queue) "保存并校对下一条" else "保存校对", showColorPicker = false, pinSourceContent = true,
-            sourceContent = {
+        CourseEditorDialog(course = candidateToCourse(c, settings.timetableId), totalWeeks = settings.totalWeeks, periodCount = settings.periods.size.coerceAtLeast(1), title = if (adding != null) "添加课程" else "校对课程", embedded = embedded, protectEdits = true, reviewHints = c.fieldErrors(settings), saveLabel = if (adding != null) "添加课程" else if(queue) "保存并校对下一条" else "保存校对", showColorPicker = false, pinSourceContent = adding == null,
+            sourceContent = if (adding != null) null else ({
                 Column {
                     if(queue) Text("剩余 ${reviewQueue(candidates, settings).size} 条 · 保存后校对下一条", style = LiquidTheme.typography.bodySmall)
                     c.reviewIssues(settings)
@@ -167,10 +177,10 @@ internal fun UnifiedImportReview(
                         .forEach { Text("! $it", style = LiquidTheme.typography.bodySmall, color = if(c.fieldErrors(settings).isNotEmpty()) LiquidTheme.colorScheme.error else LiquidTheme.colorScheme.onSurfaceVariant) }
                     if(session != null) ImportCourseSource(session, c, settings, compact = true) else Text("来源：$sourceLabel", style = LiquidTheme.typography.bodySmall)
                 }
-            }, onDismiss = { addingId = null; selected = null }, onSave = { saved ->
+            }), onDismiss = { addingId = null; selected = null }, onSave = { saved ->
                 val next = c.copy(name = saved.name, teacher = saved.teacher, location = saved.location, dayOfWeek = saved.dayOfWeek, startSection = saved.startSection, duration = saved.duration, startWeek = saved.startWeek, endWeek = saved.endWeek, weekType = saved.weekType, needsReview = false)
                 if(adding != null) { onCandidates(candidates + next); addingId = null } else update(c, next)
-            }, onDelete = { if(adding != null) addingId = null else update(c, null) })
+            }, onDelete = if (adding != null) null else ({ update(c, null) }))
     } } }
     BackHandler(selected == null && adding == null && !original && !more && !confirm && !leave && !reselect) { dismiss() }
     FullscreenPageContainer(Modifier.testTag("import-review-page")) {
@@ -182,26 +192,79 @@ internal fun UnifiedImportReview(
                 TextButton(onClick = { dismiss() }, enabled = !saving && editing == null) { Text("返回") }
                 Column(Modifier.weight(1f).padding(8.dp)) {
                     Text("导入确认", style = LiquidTheme.typography.titleLarge)
-                    Text("$sourceLabel · ${candidates.size} 条上课记录", style = LiquidTheme.typography.bodySmall)
+                    Text(sourceLabel, style = LiquidTheme.typography.bodySmall)
                 }
-                TextButton(onClick = { more = true }, enabled = !saving && editing == null) { Text("更多") }
-            }
-            SectionFrame(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).testTag("review-summary-bar")) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (errors + suggestions > 0) "! $errors 条需修正 · $suggestions 条建议确认" else if (completed) "✓ 校对完成" else "✓ 未发现必修正项", modifier = Modifier.weight(1f), style = LiquidTheme.typography.bodyMedium)
-                    if (errors + suggestions > 0) TextButton(onClick = ::startQueue, enabled = !saving && editing == null) { Text("开始校对") }
+                Box {
+                    TextButton(
+                        onClick = { more = true },
+                        enabled = !saving && editing == null,
+                        modifier = Modifier.onGloballyPositioned { moreAnchorBounds = it.boundsInRoot() }
+                    ) { Text("更多") }
+                    DropdownMenu(
+                        expanded = more,
+                        onDismissRequest = { more = false },
+                        anchorBounds = moreAnchorBounds,
+                        alignment = DropdownMenuAlignment.END,
+                        onClosed = {
+                            when (pendingMoreAction) {
+                                ReviewMoreAction.ADD -> {
+                                    queue = false
+                                    addingId = java.util.UUID.randomUUID().toString()
+                                }
+                                ReviewMoreAction.ORIGINAL -> original = true
+                                ReviewMoreAction.RESELECT -> if (hasEdits) reselect = true else onReselect?.invoke()
+                                null -> Unit
+                            }
+                            pendingMoreAction = null
+                        }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("添加课程", Modifier.fillMaxWidth()) },
+                            onClick = {
+                                pendingMoreAction = ReviewMoreAction.ADD
+                                more = false
+                            }
+                        )
+                        if (session != null) {
+                            DropdownMenuItem(
+                                text = { Text("查看原图", Modifier.fillMaxWidth()) },
+                                onClick = { pendingMoreAction = ReviewMoreAction.ORIGINAL; more = false }
+                            )
+                        }
+                        if (onReselect != null) {
+                            DropdownMenuItem(
+                                text = { Text("调整识别范围", Modifier.fillMaxWidth()) },
+                                onClick = {
+                                    pendingMoreAction = ReviewMoreAction.RESELECT
+                                    more = false
+                                }
+                            )
+                        }
+                    }
                 }
             }
-            FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("全部 ${candidates.size}", "需修正 $errors", "建议确认 $suggestions").forEachIndexed { i, label ->
-                    OptionChip(filter == i, { filter = i }, label)
+                FlowRow(
+                    Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val filters = buildList {
+                        add(0 to "全部 ${candidates.size}")
+                        if (errors > 0) add(1 to "需修正 $errors")
+                        if (suggestions > 0) add(2 to "建议确认 $suggestions")
+                    }
+                    filters.forEach { (id, label) ->
+                        OptionChip(activeFilter == id, { filter = id }, label, large = true)
+                    }
                 }
+                if (errors + suggestions > 0) TextButton(onClick = ::startQueue, enabled = !saving && editing == null) { Text("开始校对") }
             }
-            val visible = candidates.filter { when (filter) { 1 -> it.fieldErrors(settings).isNotEmpty(); 2 -> it.fieldErrors(settings).isEmpty() && it.needsReview; else -> true } }
+            val visible = candidates.filter { when (activeFilter) { 1 -> it.fieldErrors(settings).isNotEmpty(); 2 -> it.fieldErrors(settings).isEmpty() && it.needsReview; else -> true } }
             val groups = groupedReviewCourses(visible, settings)
             LazyColumn(
                 state = listState,
@@ -212,7 +275,7 @@ internal fun UnifiedImportReview(
                 if (groups.isEmpty()) item { Text(if (candidates.isEmpty()) "暂无课程，请从更多操作添加或重新识别" else "没有符合条件的记录", Modifier.padding(16.dp)) }
                 groups.forEach { group ->
                     item("header-${group.label}") {
-                        Row(Modifier.fillMaxWidth().padding(start = 2.dp, top = 8.dp, end = 2.dp, bottom = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Row(Modifier.fillMaxWidth().padding(start = 2.dp, top = 4.dp, end = 2.dp, bottom = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(group.label, style = LiquidTheme.typography.labelLarge, color = LiquidTheme.colorScheme.onSurfaceVariant)
                             Text("${group.courses.size} 条", style = LiquidTheme.typography.labelSmall, color = LiquidTheme.colorScheme.onSurfaceVariant)
                         }
@@ -267,15 +330,19 @@ internal fun UnifiedImportReview(
         if (!wide && editing != null) editor(false)
         }
     }
-    if (more) AlertDialog(onDismissRequest = { more = false }, title = { Text("更多操作") }, text = {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            TextButton(onClick = { more = false; queue = false; addingId = java.util.UUID.randomUUID().toString() }, modifier = Modifier.fillMaxWidth()) { Text("添加课程", Modifier.fillMaxWidth()) }
-            if (session != null) TextButton(onClick = { more = false; original = true }, modifier = Modifier.fillMaxWidth()) { Text("查看原图", Modifier.fillMaxWidth()) }
-            if (onReselect != null) TextButton(onClick = { more = false; if (hasEdits) reselect = true else onReselect() }, modifier = Modifier.fillMaxWidth()) { Text("调整识别范围", Modifier.fillMaxWidth()) }
-        }
-    }, confirmButton = { TextButton(onClick = { more = false }) { Text("关闭") } })
     if (original && session != null) ImportSourceViewer(session.sourceImage?.let { listOf(it.preview) } ?: session.pages.map { it.image }, "完整原图", { original = false })
-    if (reselect || leave) AlertDialog(onDismissRequest = { reselect = false; leave = false }, title = { Text(if (reselect) "重新识别？" else "放弃本次导入？") }, text = { Text("本次已修改、添加或删除的记录将被放弃。") }, confirmButton = { TextButton(onClick = { if (reselect) onReselect?.invoke() else onDismiss(); reselect = false; leave = false }) { Text("放弃修改并继续") } }, dismissButton = { TextButton(onClick = { reselect = false; leave = false }) { Text("继续校对") } })
+    if (reselect) ModalBottomSheet(onDismissRequest = { reselect = false }) {
+        val dismissController = LocalDialogDismissController.current
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("重新识别？", style = LiquidTheme.typography.titleLarge)
+            Text("本次已修改、添加或删除的记录将被放弃。", style = LiquidTheme.typography.bodyMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { dismissController?.dismiss { reselect = false } ?: run { reselect = false } }, modifier = Modifier.weight(1f)) { Text("继续校对") }
+                Button(onClick = { dismissController?.dismiss { reselect = false; onReselect?.invoke() } ?: run { reselect = false; onReselect?.invoke() } }, modifier = Modifier.weight(1f)) { Text("放弃修改并继续") }
+            }
+        }
+    }
+    if (leave) AlertDialog(onDismissRequest = { leave = false }, title = { Text("放弃本次导入？") }, text = { Text("本次已修改、添加或删除的记录将被放弃。") }, confirmButton = { TextButton(onClick = { onDismiss(); leave = false }) { Text("放弃修改并继续") } }, dismissButton = { TextButton(onClick = { leave = false }) { Text("继续校对") } })
     if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("确认导入") }, text = { Text("${if(overwrite) "覆盖" else "追加到"}「$targetName」：${candidates.size} 条记录。" + (if (overwrite) "将替换现有 $existingCount 条记录。" else "") + (if(suggestions > 0) "仍有 $suggestions 条建议确认，可返回校对或继续导入。" else "")) }, confirmButton = { TextButton(onClick = { confirm = false; onConfirm(overwrite) }, enabled = !saving && editing == null) { Text(if (overwrite) "覆盖并导入" else "确认导入") } }, dismissButton = { TextButton(onClick = { confirm = false; if(suggestions > 0) startQueue() }) { Text("返回校对") } })
 
 }

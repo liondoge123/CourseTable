@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -68,12 +69,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.theme.LiquidTheme
@@ -229,8 +233,6 @@ fun ModalBottomSheet(
                         modifier = Modifier
                             .widthIn(max = 720.dp)
                             .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .imePadding()
                             .offset { IntOffset(0, drag.coerceAtLeast(0f).roundToInt()) }
                             .nestedScroll(nestedScrollConnection)
                             .clickable(
@@ -240,9 +242,15 @@ fun ModalBottomSheet(
                             ),
                         shape = shape,
                         baseColor = containerColor.takeUnless { it == Color.Unspecified },
-                        shadowElevation = 24.dp
+                        shadowElevation = 24.dp,
+                        style = OverlayGlassStyle.SHEET
                     ) {
-                        Column(Modifier.fillMaxWidth()) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .imePadding()
+                        ) {
                             Box(
                                 Modifier
                                     .fillMaxWidth()
@@ -367,7 +375,8 @@ fun AlertDialog(
                                 onClick = {}
                             ),
                         shape = RoundedRectangle(32.dp),
-                        shadowElevation = 24.dp
+                        shadowElevation = 24.dp,
+                        style = OverlayGlassStyle.DIALOG
                     ) {
                         Column {
                             if (title != null) {
@@ -386,6 +395,55 @@ fun AlertDialog(
                             }
                             LibraryDialogActions(dismissButton, confirmButton)
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun GlassProgressDialog(
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    GlassOverlayPortal(OverlayDestination.DIALOG) {
+        BackHandler(enabled = true, onBack = {})
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(libraryOverlayDimColor())
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            OverlayGlassSurface(
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .then(modifier),
+                shape = RoundedRectangle(28.dp),
+                shadowElevation = 24.dp,
+                style = OverlayGlassStyle.DIALOG
+            ) {
+                Row(
+                    Modifier.padding(24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(Modifier.size(28.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(title, style = LiquidTheme.typography.titleMedium)
+                        Text(
+                            message,
+                            style = LiquidTheme.typography.bodySmall,
+                            color = LiquidTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -711,7 +769,8 @@ fun NumberWheelPickerDialog(
                                 onClick = {}
                             ),
                         shape = RoundedRectangle(32.dp),
-                        shadowElevation = 24.dp
+                        shadowElevation = 24.dp,
+                        style = OverlayGlassStyle.DIALOG
                     ) {
                         Column {
                             Text(
@@ -767,11 +826,76 @@ fun NumberWheelPickerDialog(
     }
 }
 
+internal enum class DropdownMenuAlignment { START, END }
+
+internal fun calculateAnchoredMenuPosition(
+    rootSize: IntSize,
+    menuSize: IntSize,
+    anchorBounds: Rect,
+    alignment: DropdownMenuAlignment,
+    safeMarginPx: Int,
+    gapPx: Int
+): IntOffset {
+    val maxX = (rootSize.width - safeMarginPx - menuSize.width).coerceAtLeast(safeMarginPx)
+    val desiredX = when (alignment) {
+        DropdownMenuAlignment.START -> anchorBounds.left.roundToInt()
+        DropdownMenuAlignment.END -> anchorBounds.right.roundToInt() - menuSize.width
+    }
+    val x = desiredX.coerceIn(safeMarginPx, maxX)
+
+    val belowY = anchorBounds.bottom.roundToInt() + gapPx
+    val aboveY = anchorBounds.top.roundToInt() - gapPx - menuSize.height
+    val maxY = (rootSize.height - safeMarginPx - menuSize.height).coerceAtLeast(safeMarginPx)
+    val y = when {
+        belowY + menuSize.height <= rootSize.height - safeMarginPx -> belowY
+        aboveY >= safeMarginPx -> aboveY
+        rootSize.height - anchorBounds.bottom >= anchorBounds.top -> belowY.coerceIn(safeMarginPx, maxY)
+        else -> aboveY.coerceIn(safeMarginPx, maxY)
+    }
+    return IntOffset(x, y)
+}
+
 @Composable
-fun DropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
-    if (!expanded) return
+internal fun DropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    anchorBounds: Rect?,
+    alignment: DropdownMenuAlignment = DropdownMenuAlignment.START,
+    modifier: Modifier = Modifier,
+    onClosed: () -> Unit = {},
+    content: @Composable () -> Unit
+) {
+    val visibility = remember { MutableTransitionState(false) }
+    var wasExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) wasExpanded = true
+        visibility.targetState = expanded
+    }
+    LaunchedEffect(visibility.currentState, visibility.isIdle, expanded) {
+        if (wasExpanded && !expanded && visibility.isIdle && !visibility.currentState) {
+            wasExpanded = false
+            onClosed()
+        }
+    }
+    val mounted = expanded || visibility.currentState || !visibility.isIdle
+    val anchor = anchorBounds
+    if (!mounted || anchor == null) return
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val safeMarginPx = with(density) { 12.dp.roundToPx() }
+    val gapPx = with(density) { 8.dp.roundToPx() }
+    val rootHeightPx = with(density) {
+        androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx()
+    }
+    val opensDown = anchor.center.y <= rootHeightPx / 2f
+    val transformOrigin = TransformOrigin(
+        pivotFractionX = if (alignment == DropdownMenuAlignment.START) 0f else 1f,
+        pivotFractionY = if (opensDown) 0f else 1f
+    )
     GlassOverlayPortal(OverlayDestination.MENU) {
-        BackHandler(onBack = onDismissRequest)
+        BackHandler(
+            enabled = visibility.currentState || visibility.targetState,
+            onBack = onDismissRequest
+        )
         Box(
             Modifier
                 .fillMaxSize()
@@ -780,26 +904,62 @@ fun DropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Comp
                     indication = null,
                     onClick = onDismissRequest
                 )
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
         ) {
-            OverlayGlassSurface(
-                modifier = Modifier
-                    .widthIn(min = 152.dp, max = 220.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    ),
-                shape = RoundedRectangle(24.dp),
-                shadowElevation = 16.dp
-            ) {
-                Column(
-                    Modifier
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 4.dp)
-                ) { content() }
+            Layout(
+                modifier = Modifier.fillMaxSize(),
+                content = {
+                    AnimatedVisibility(
+                        visibleState = visibility,
+                        enter = scaleIn(
+                            initialScale = 0.94f,
+                            transformOrigin = transformOrigin,
+                            animationSpec = tween(190, easing = LinearOutSlowInEasing)
+                        ) + fadeIn(tween(130, easing = LinearOutSlowInEasing)),
+                        exit = scaleOut(
+                            targetScale = 0.96f,
+                            transformOrigin = transformOrigin,
+                            animationSpec = tween(160, easing = FastOutSlowInEasing)
+                        ) + fadeOut(tween(120, easing = FastOutSlowInEasing))
+                    ) {
+                        OverlayGlassSurface(
+                            modifier = modifier
+                                .widthIn(min = 152.dp, max = 184.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {}
+                                ),
+                            shape = RoundedRectangle(24.dp),
+                            shadowElevation = 0.dp,
+                            style = OverlayGlassStyle.MENU
+                        ) {
+                            Column(
+                                Modifier
+                                    .heightIn(max = 320.dp)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(vertical = 2.dp)
+                            ) { content() }
+                        }
+                    }
+                }
+            ) { measurables, constraints ->
+                val rootSize = IntSize(constraints.maxWidth, constraints.maxHeight)
+                val placeable = measurables.singleOrNull()?.measure(
+                    constraints.copy(minWidth = 0, minHeight = 0)
+                )
+                layout(rootSize.width, rootSize.height) {
+                    if (placeable != null) {
+                        val position = calculateAnchoredMenuPosition(
+                            rootSize = rootSize,
+                            menuSize = IntSize(placeable.width, placeable.height),
+                            anchorBounds = anchor,
+                            alignment = alignment,
+                            safeMarginPx = safeMarginPx,
+                            gapPx = gapPx
+                        )
+                        placeable.place(position.x, position.y)
+                    }
+                }
             }
         }
     }
@@ -807,9 +967,9 @@ fun DropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Comp
 
 @Composable
 private fun libraryOverlayDimColor(): Color = if (LiquidTheme.colorScheme.isDark) {
-    Color(0xFF121212).copy(alpha = 0.56f)
+    Color(0xFF121212).copy(alpha = 0.28f)
 } else {
-    Color(0xFF29293A).copy(alpha = 0.23f)
+    Color(0xFF29293A).copy(alpha = 0.10f)
 }
 
 @Composable
@@ -879,7 +1039,7 @@ fun DropdownMenuItem(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .clip(RoundedRectangle(20.dp))
                 .background(
                     if (selected) colors.primary.copy(alpha = if (colors.isDark) 0.20f else 0.12f)
                     else Color.Transparent
