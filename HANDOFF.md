@@ -5,7 +5,7 @@
 
 ## 当前状态
 
-- v1.7.0 正式构建已由 `scripts/build-apk.ps1 release -VersionName 1.7.0` 生成；待将代码、带注释标签和安装包同步至 GitHub。
+- v1.7.0 正式构建由 `scripts/build-apk.ps1 release -VersionName 1.7.0` 生成。源码与带注释标签保存在 Git，三种安装包与校验和作为 GitHub Release 资产分发。
 - `version.properties` 为 `VERSION_NAME=1.7.0`、`VERSION_CODE=130`、`LAST_RELEASE_VERSION=1.7.0`；发布标签为 `v1.7.0`。
 - README 已补充时间方案功能；用户更新说明见 [`docs/releases/v1.7.0.md`](docs/releases/v1.7.0.md)，按钮约定见 [`docs/UI_BUTTON_GUIDELINES.md`](docs/UI_BUTTON_GUIDELINES.md)。
 
