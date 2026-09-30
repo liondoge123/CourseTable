@@ -9,7 +9,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,7 +76,7 @@ internal fun ImportSourceViewer(files: List<File>, title: String, onDismiss: () 
 
 @Composable
 internal fun ImportCourseSource(session: VisualImportSession, candidate: CandidateCourse, settings: AppSettings, compact: Boolean = false) {
-    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val keyboardVisible = rememberImeVisible()
     val regions = session.result.regions.filter { it.id in candidate.sourceRegionIds() }
     var selected by remember(candidate) { mutableIntStateOf(0) }
     var full by remember { mutableStateOf(false) }

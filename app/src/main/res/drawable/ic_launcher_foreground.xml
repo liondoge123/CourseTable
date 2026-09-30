@@ -5,38 +5,32 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 日历主体 -->
+    <!-- 课表卡片：主体和装订环保持在自适应图标的安全区域内。 -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M40,34 H68 Q78,34 78,44 V72 Q78,82 68,82 H40 Q30,82 30,72 V44 Q30,34 40,34 Z" />
+        android:pathData="M39,32 H69 Q78,32 78,41 V71 Q78,80 69,80 H39 Q30,80 30,71 V41 Q30,32 39,32 Z" />
 
-    <!-- 装订环 -->
+    <!-- 简短的装订环 -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M42,26 Q45,26 45,29 V41 Q45,44 42,44 Q39,44 39,41 V29 Q39,26 42,26 Z" />
+        android:pathData="M42,26 Q44,26 44,28 V35 Q44,37 42,37 Q40,37 40,35 V28 Q40,26 42,26 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M66,26 Q69,26 69,29 V41 Q69,44 66,44 Q63,44 63,41 V29 Q63,26 66,26 Z" />
+        android:pathData="M66,26 Q68,26 68,28 V35 Q68,37 66,37 Q64,37 64,35 V28 Q64,26 66,26 Z" />
 
-    <!-- 课程色块（第一行） -->
+    <!-- 短块高 15，长块高 26.5；第二列底部对齐左下短块中心，第三列底部对齐。 -->
     <path
-        android:fillColor="#3E63DD"
-        android:pathData="M36,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+        android:fillColor="#5274DF"
+        android:pathData="M39.5,39 H43.5 Q46,39 46,41.5 V51.5 Q46,54 43.5,54 H39.5 Q37,54 37,51.5 V41.5 Q37,39 39.5,39 Z" />
     <path
-        android:fillColor="#0E8A6D"
-        android:pathData="M49,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+        android:fillColor="#79CDB3"
+        android:pathData="M52,39 H56 Q58.5,39 58.5,41.5 V63 Q58.5,65.5 56,65.5 H52 Q49.5,65.5 49.5,63 V41.5 Q49.5,39 52,39 Z" />
     <path
-        android:fillColor="#7C5CD6"
-        android:pathData="M62,48 h10 a3,3 0 0 1 3,3 v10 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-10 a3,3 0 0 1 3,-3 z" />
+        android:fillColor="#AD9AE3"
+        android:pathData="M64.5,46.5 H68.5 Q71,46.5 71,49 V70.5 Q71,73 68.5,73 H64.5 Q62,73 62,70.5 V49 Q62,46.5 64.5,46.5 Z" />
 
-    <!-- 课程色块（第二行） -->
+    <!-- 第一列的第二节课程 -->
     <path
-        android:fillColor="#D95D39"
-        android:pathData="M36,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
-    <path
-        android:fillColor="#C2477F"
-        android:pathData="M49,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
-    <path
-        android:fillColor="#157F9C"
-        android:pathData="M62,66 h10 a3,3 0 0 1 3,3 v6 a3,3 0 0 1 -3,3 h-10 a3,3 0 0 1 -3,-3 v-6 a3,3 0 0 1 3,-3 z" />
+        android:fillColor="#8DA7EC"
+        android:pathData="M39.5,58 H43.5 Q46,58 46,60.5 V70.5 Q46,73 43.5,73 H39.5 Q37,73 37,70.5 V60.5 Q37,58 39.5,58 Z" />
 </vector>

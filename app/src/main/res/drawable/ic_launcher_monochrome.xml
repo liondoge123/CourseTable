@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 独立单色轮廓，课程块镂空，避免主题图标变成实心白色日历。 -->
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M39,32 H69 Q78,32 78,41 V71 Q78,80 69,80 H39 Q30,80 30,71 V41 Q30,32 39,32 Z
+            M39.5,39 H43.5 Q46,39 46,41.5 V51.5 Q46,54 43.5,54 H39.5 Q37,54 37,51.5 V41.5 Q37,39 39.5,39 Z
+            M52,39 H56 Q58.5,39 58.5,41.5 V63 Q58.5,65.5 56,65.5 H52 Q49.5,65.5 49.5,63 V41.5 Q49.5,39 52,39 Z
+            M64.5,46.5 H68.5 Q71,46.5 71,49 V70.5 Q71,73 68.5,73 H64.5 Q62,73 62,70.5 V49 Q62,46.5 64.5,46.5 Z
+            M39.5,58 H43.5 Q46,58 46,60.5 V70.5 Q46,73 43.5,73 H39.5 Q37,73 37,70.5 V60.5 Q37,58 39.5,58 Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M42,26 Q44,26 44,28 V35 Q44,37 42,37 Q40,37 40,35 V28 Q40,26 42,26 Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M66,26 Q68,26 68,28 V35 Q68,37 66,37 Q64,37 64,35 V28 Q64,26 66,26 Z" />
+</vector>

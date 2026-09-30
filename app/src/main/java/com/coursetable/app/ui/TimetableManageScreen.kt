@@ -168,6 +168,7 @@ fun TimetableManageScreen(
         AlertDialog(
             onDismissRequest = { timetableToDelete = null },
             title = { Text("删除课表") },
+            confirmButtonRole = DialogActionRole.Destructive,
             text = { Text("确定要删除课表「${table.name}」吗？此操作不可撤销。") },
             confirmButton = {
                 val dismissController = LocalDialogDismissController.current

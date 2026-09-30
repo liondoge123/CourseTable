@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -50,8 +49,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.CourseApp
-import com.coursetable.app.data.PeriodTime
-import com.coursetable.app.data.PeriodUtils
 import com.coursetable.app.importer.BackupManager
 import com.coursetable.app.importer.IcsExporter
 import com.coursetable.app.reminder.ReminderScheduler
@@ -113,7 +110,7 @@ fun SettingsScreen(
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showPeriodsEditor by remember { mutableStateOf(false) }
-    var editorPeriods by remember { mutableStateOf<List<PeriodTime>>(emptyList()) }
+    val timeSchemes by settingsRepo.periodTimeSchemes.collectAsState(initial = emptyList())
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showThemeModePicker by remember { mutableStateOf(false) }
     var showTimetableManage by remember { mutableStateOf(false) }
@@ -359,6 +356,7 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showClearConfirmDialog = false },
             title = { Text("清空所有课程") },
+            confirmButtonRole = DialogActionRole.Destructive,
             text = { Text("确定要清空当前课表的所有课程吗？此操作不可撤销，建议先导出备份。") },
             confirmButton = {
                 val dismissController = LocalDialogDismissController.current
@@ -490,7 +488,6 @@ fun SettingsScreen(
                     "${settings.periods.firstOrNull()?.start?.toString()?.substring(0, 5) ?: "--:--"} - " +
                     "${settings.periods.lastOrNull()?.end?.toString()?.substring(0, 5) ?: "--:--"}",
                 onClick = {
-                    editorPeriods = settings.periods
                     showPeriodsEditor = true
                 }
             )
@@ -662,20 +659,19 @@ fun SettingsScreen(
     }
 
     if (showPeriodsEditor) {
-        PeriodsEditorDialog(
-            periods = editorPeriods,
-            defaultDuration = settings.periodDurationMinutes,
-            onConfirm = { periods, duration ->
-                scope.launch {
-                    settingsRepo.save(periods = periods, periodDurationMinutes = duration)
-                }
-                showPeriodsEditor = false
-            },
+        val timetableId = settings.timetableId
+        PeriodTimeSchemesDialog(
+            schemes = timeSchemes,
+            periods = settings.periods,
+            durationMinutes = settings.periodDurationMinutes,
+            onSave = { settingsRepo.savePeriodTimeScheme(it) },
+            onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
+            onSaveCurrent = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
+            onDelete = { settingsRepo.deletePeriodTimeScheme(it) },
             onDismiss = { showPeriodsEditor = false }
         )
     }
 }
-
 /** 权限检查弹窗中的单行：图标 + 名称/说明 + 状态文字 */
 @Composable
 private fun PermRow(
@@ -958,165 +954,6 @@ private fun AlignSegment(label: String, selected: Boolean, onClick: () -> Unit) 
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun PeriodsEditorDialog(
-    periods: List<PeriodTime>,
-    defaultDuration: Int,
-    onConfirm: (List<PeriodTime>, Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var duration by remember { mutableStateOf(defaultDuration.coerceIn(20, 90)) }
-    var starts by remember(periods) { mutableStateOf(periods.map { it.start }) }
-    var editingIndex by remember { mutableStateOf<Int?>(null) }
-    var deleteConfirmIndex by remember { mutableStateOf<Int?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(deleteConfirmIndex) {
-        if (deleteConfirmIndex != null) {
-            kotlinx.coroutines.delay(5_000)
-            deleteConfirmIndex = null
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("编辑节次时间") },
-        text = {
-            Column(
-                Modifier
-                    .heightIn(max = 460.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 全局默认时长
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("每节课时长", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { duration = (duration - 5).coerceAtLeast(20) }) {
-                        Icon(Icons.Filled.Remove, contentDescription = "减 5 分钟", modifier = Modifier.size(20.dp))
-                    }
-                    Text("$duration 分钟", style = MaterialTheme.typography.titleSmall)
-                    IconButton(onClick = { duration = (duration + 5).coerceAtMost(90) }) {
-                        Icon(Icons.Filled.Add, contentDescription = "加 5 分钟", modifier = Modifier.size(20.dp))
-                    }
-                }
-                HorizontalDivider()
-
-                starts.forEachIndexed { index, start ->
-                    val end = start.plusMinutes(duration.toLong())
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { editingIndex = index }
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "第 ${index + 1} 节",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.width(64.dp)
-                        )
-                        Column {
-                            Text(
-                                text = start.toString().substring(0, 5),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "结束 ${end.toString().substring(0, 5)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                        if (starts.size > 1) {
-                            InlineDeleteAction(
-                                armed = deleteConfirmIndex == index,
-                                onArm = { deleteConfirmIndex = index },
-                                onConfirm = {
-                                    starts = starts.filterIndexed { i, _ -> i != index }
-                                    deleteConfirmIndex = null
-                                },
-                                compact = true
-                            )
-                        }
-                        Icon(Icons.Filled.Edit, contentDescription = "选择开始时间", modifier = Modifier.size(18.dp))
-                    }
-                    if (index != starts.lastIndex) HorizontalDivider()
-                }
-
-                OutlinedButton(onClick = {
-                    val lastEnd = starts.lastOrNull()?.plusMinutes(duration.toLong())
-                    val newStart = lastEnd?.plusMinutes(10) ?: java.time.LocalTime.of(8, 0)
-                    starts = starts + newStart
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(" 添加节次")
-                }
-
-                if (error != null) {
-                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            val dismissController = LocalDialogDismissController.current
-            TextButton(onClick = {
-                val err = PeriodUtils.validate(starts, duration)
-                if (err != null) {
-                    error = err
-                    return@TextButton
-                }
-                dismissController?.dismiss {
-                    onConfirm(PeriodUtils.build(starts, duration), duration)
-                } ?: onConfirm(PeriodUtils.build(starts, duration), duration)
-            }) { Text("保存") }
-        },
-        dismissButton = {
-            val dismissController = LocalDialogDismissController.current
-            TextButton(onClick = { dismissController?.dismiss() ?: onDismiss() }) { Text("取消") }
-        }
-    )
-
-    editingIndex?.let { index ->
-        val initial = starts[index]
-        val timeState = rememberTimePickerState(
-            initialHour = initial.hour,
-            initialMinute = initial.minute,
-            is24Hour = true
-        )
-        AlertDialog(
-            onDismissRequest = { editingIndex = null },
-            title = { Text("第 ${index + 1} 节开始时间") },
-            text = { TimePicker(state = timeState) },
-            confirmButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = {
-                    dismissController?.dismiss {
-                        starts = starts.toMutableList().also {
-                            it[index] = java.time.LocalTime.of(timeState.hour, timeState.minute)
-                        }
-                        editingIndex = null
-                    } ?: run {
-                        starts = starts.toMutableList().also {
-                            it[index] = java.time.LocalTime.of(timeState.hour, timeState.minute)
-                        }
-                        editingIndex = null
-                    }
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = { dismissController?.dismiss() ?: run { editingIndex = null } }) { Text("取消") }
-            }
         )
     }
 }

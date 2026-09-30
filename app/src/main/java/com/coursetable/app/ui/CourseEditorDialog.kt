@@ -114,7 +114,7 @@ fun CourseEditorDialog(
         startWeek != course.startWeek || endWeek != course.endWeek || weekType.code != course.weekType || color != course.color
     fun requestDismiss() { if (!saving) { if (protectEdits && changed) discardChanges = true else onDismiss() } }
     androidx.activity.compose.BackHandler(embedded) { requestDismiss() }
-    if (discardChanges) AlertDialog(onDismissRequest = { discardChanges = false }, title = { Text("保存校对修改？") },
+    if (discardChanges) AlertDialog(dismissButtonRole = DialogActionRole.Destructive, onDismissRequest = { discardChanges = false }, title = { Text("保存校对修改？") },
         text = { Text("当前课程有尚未保存的修改。") },
         confirmButton = { TextButton(onClick = { discardChanges = false; save() }, enabled = name.isNotBlank()) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("放弃修改") } })

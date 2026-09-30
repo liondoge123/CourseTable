@@ -189,12 +189,13 @@ fun Surface(
     )
 }
 
-private enum class ButtonKind { Filled, Tonal, Outline, Text }
+private enum class ButtonKind { Filled, Tonal, Outline, Text, Destructive }
 
-internal val LiquidButtonShape = RoundedCornerShape(13.dp)
+internal val LiquidButtonShape: Shape = Capsule()
 
 internal val LocalLibraryDialogAction = staticCompositionLocalOf { false }
 internal val LocalLibraryDialogActionColor = staticCompositionLocalOf { Color.Unspecified }
+internal val LocalLibraryDialogActionShape = staticCompositionLocalOf<Shape> { Capsule() }
 
 @Composable
 private fun LiquidButton(
@@ -213,6 +214,7 @@ private fun LiquidButton(
         ButtonKind.Tonal -> colors.primaryContainer
         ButtonKind.Outline -> colors.surfaceContainerHigh
         ButtonKind.Text -> Color.Transparent
+        ButtonKind.Destructive -> colors.error.copy(alpha = 0.12f)
     }
     val background = when {
         kind == ButtonKind.Text -> Color.Transparent
@@ -224,9 +226,10 @@ private fun LiquidButton(
     } else when (kind) {
         ButtonKind.Filled -> colors.onPrimary
         ButtonKind.Tonal -> colors.onPrimaryContainer
+        ButtonKind.Destructive -> colors.error
         else -> colors.primary
     }.let { if (enabled) it else it.copy(alpha = 0.55f) }
-    val shape = if (isLibraryDialogAction) Capsule() else LiquidButtonShape
+    val shape = if (isLibraryDialogAction) LocalLibraryDialogActionShape.current else LiquidButtonShape
     CompositionLocalProvider(LocalContentColor provides foreground) {
         Row(
             modifier = modifier
@@ -245,6 +248,7 @@ private fun LiquidButton(
 }
 
 @Composable fun Button(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 10.dp), content: @Composable RowScope.() -> Unit) = LiquidButton(onClick, modifier, enabled, contentPadding, ButtonKind.Filled, content)
+@Composable fun DestructiveButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable RowScope.() -> Unit) = LiquidButton(onClick, modifier, enabled, PaddingValues(horizontal = 16.dp, vertical = 10.dp), ButtonKind.Destructive, content)
 @Composable fun FilledTonalButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 10.dp), content: @Composable RowScope.() -> Unit) = LiquidButton(onClick, modifier, enabled, contentPadding, ButtonKind.Tonal, content)
 @Composable fun OutlinedButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 10.dp), content: @Composable RowScope.() -> Unit) = LiquidButton(onClick, modifier, enabled, contentPadding, ButtonKind.Outline, content)
 @Composable fun TextButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp), content: @Composable RowScope.() -> Unit) = LiquidButton(onClick, modifier, enabled, contentPadding, ButtonKind.Text, content)
@@ -363,9 +367,12 @@ fun RadioButton(selected: Boolean, onClick: (() -> Unit)?, modifier: Modifier = 
             ) { onClick?.invoke() },
         contentAlignment = Alignment.Center
     ) {
-        Box(Modifier.size(22.dp).border(1.8.dp, color, CircleShape), contentAlignment = Alignment.Center) {
-            if (selected) Box(Modifier.size(12.dp).background(color, CircleShape))
-        }
+        Icon(
+            imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = color
+        )
     }
 }
 

@@ -442,10 +442,10 @@ fun ImportScreen(
             title = { Text(if (busy || autoRecognizing) "正在识别课表…" else "未能识别课表") },
             text = { Text(selectionError ?: "识别完成后将直接显示导入确认清单") },
             confirmButton = { if (!busy && !autoRecognizing) TextButton(onClick = { autoRecognizing = true }) { Text("重试") } },
-            dismissButton = { if (!busy && !autoRecognizing) Row {
-                TextButton(onClick = { choosingImage = true }) { Text("调整范围") }
-                TextButton(onClick = { preparedImage = null; selectionError = null; openFile.launch("image/*") }) { Text("换图") }
-            } }
+            additionalActions = listOf(
+                DialogAction("调整范围", { choosingImage = true }, enabled = !busy && !autoRecognizing),
+                DialogAction("换图", { preparedImage = null; selectionError = null; openFile.launch("image/*") }, enabled = !busy && !autoRecognizing)
+            )
         )
     }
 

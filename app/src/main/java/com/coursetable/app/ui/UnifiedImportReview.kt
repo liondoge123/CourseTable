@@ -337,12 +337,12 @@ internal fun UnifiedImportReview(
             Text("重新识别？", style = LiquidTheme.typography.titleLarge)
             Text("本次已修改、添加或删除的记录将被放弃。", style = LiquidTheme.typography.bodyMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { dismissController?.dismiss { reselect = false } ?: run { reselect = false } }, modifier = Modifier.weight(1f)) { Text("继续校对") }
-                Button(onClick = { dismissController?.dismiss { reselect = false; onReselect?.invoke() } ?: run { reselect = false; onReselect?.invoke() } }, modifier = Modifier.weight(1f)) { Text("放弃修改并继续") }
+                Button(onClick = { dismissController?.dismiss { reselect = false } ?: run { reselect = false } }, modifier = Modifier.weight(1f)) { Text("继续校对") }
+                DestructiveButton(onClick = { dismissController?.dismiss { reselect = false; onReselect?.invoke() } ?: run { reselect = false; onReselect?.invoke() } }, modifier = Modifier.weight(1f)) { Text("放弃修改并继续") }
             }
         }
     }
-    if (leave) AlertDialog(onDismissRequest = { leave = false }, title = { Text("放弃本次导入？") }, text = { Text("本次已修改、添加或删除的记录将被放弃。") }, confirmButton = { TextButton(onClick = { onDismiss(); leave = false }) { Text("放弃修改并继续") } }, dismissButton = { TextButton(onClick = { leave = false }) { Text("继续校对") } })
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("确认导入") }, text = { Text("${if(overwrite) "覆盖" else "追加到"}「$targetName」：${candidates.size} 条记录。" + (if (overwrite) "将替换现有 $existingCount 条记录。" else "") + (if(suggestions > 0) "仍有 $suggestions 条建议确认，可返回校对或继续导入。" else "")) }, confirmButton = { TextButton(onClick = { confirm = false; onConfirm(overwrite) }, enabled = !saving && editing == null) { Text(if (overwrite) "覆盖并导入" else "确认导入") } }, dismissButton = { TextButton(onClick = { confirm = false; if(suggestions > 0) startQueue() }) { Text("返回校对") } })
+    if (leave) AlertDialog(confirmButtonRole = DialogActionRole.Destructive, onDismissRequest = { leave = false }, title = { Text("放弃本次导入？") }, text = { Text("本次已修改、添加或删除的记录将被放弃。") }, confirmButton = { TextButton(onClick = { onDismiss(); leave = false }) { Text("放弃修改并继续") } }, dismissButton = { TextButton(onClick = { leave = false }) { Text("继续校对") } })
+    if (confirm) AlertDialog(confirmButtonRole = if (overwrite) DialogActionRole.Destructive else DialogActionRole.Primary, onDismissRequest = { confirm = false }, title = { Text("确认导入") }, text = { Text("${if(overwrite) "覆盖" else "追加到"}「$targetName」：${candidates.size} 条记录。" + (if (overwrite) "将替换现有 $existingCount 条记录。" else "") + (if(suggestions > 0) "仍有 $suggestions 条建议确认，可返回校对或继续导入。" else "")) }, confirmButton = { TextButton(onClick = { confirm = false; onConfirm(overwrite) }, enabled = !saving && editing == null) { Text(if (overwrite) "覆盖并导入" else "确认导入") } }, dismissButton = { TextButton(onClick = { confirm = false; if(suggestions > 0) startQueue() }) { Text("返回校对") } })
 
 }

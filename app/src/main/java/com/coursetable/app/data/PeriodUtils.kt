@@ -11,10 +11,15 @@ object PeriodUtils {
     /** 校验：开始时间严格递增且不重叠；合法返回 null，否则返回错误提示 */
     fun validate(starts: List<LocalTime>, durationMinutes: Int): String? {
         if (durationMinutes <= 0) return "时长必须大于 0"
+        if (starts.isEmpty()) return "至少保留一个节次"
+        if (durationMinutes >= 24 * 60) return "节次时间不能跨越午夜"
         val periods = build(starts, durationMinutes)
+        periods.forEachIndexed { index, period ->
+            if (period.end <= period.start) return "第 ${index + 1} 节结束时间不能跨越午夜"
+        }
         for (i in 1 until periods.size) {
             if (periods[i].start.isBefore(periods[i - 1].end)) {
-                return "第 ${i} 节开始时间早于第 ${i - 1} 节结束时间"
+                return "第 ${i + 1} 节开始时间早于第 ${i} 节结束时间"
             }
         }
         return null

@@ -83,10 +83,49 @@ class SettingsRepository(
         val THEME_COLOR = stringPreferencesKey("theme_color")
         val REMINDER_ENABLED = intPreferencesKey("reminder_enabled")
         val REMINDER_MINUTES = intPreferencesKey("reminder_minutes")
+        val PERIOD_TIME_SCHEMES = stringPreferencesKey("period_time_schemes_json")
     }
 
     /** 当前激活课表 id */
     val activeTimetableId: Flow<Long> = context.dataStore.data.map { it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L }
+
+    val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = context.dataStore.data.map {
+        PeriodTimeScheme.decode(it[Keys.PERIOD_TIME_SCHEMES])
+    }
+
+    suspend fun savePeriodTimeScheme(scheme: PeriodTimeScheme) {
+        val normalized = scheme.copy(name = scheme.name.trim())
+        require(PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(normalized))) == listOf(normalized)) {
+            "时间方案不合法"
+        }
+        context.dataStore.edit { prefs ->
+            val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
+            require(schemes.none { it.id != normalized.id && it.name == normalized.name }) {
+                "已有同名时间方案"
+            }
+            val updated = if (schemes.any { it.id == scheme.id }) {
+                schemes.map { if (it.id == scheme.id) normalized else it }
+            } else schemes + normalized
+            prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(updated)
+        }
+    }
+
+    suspend fun deletePeriodTimeScheme(id: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(
+                PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES]).filterNot { it.id == id }
+            )
+        }
+    }
+
+    /** 应用到打开方案面板的课表，避免异步写入时误改其他课表。 */
+    suspend fun applyPeriodTimeScheme(timetableId: Long, scheme: PeriodTimeScheme) {
+        val timetable = requireNotNull(timetableDao.byId(timetableId)) { "课表不存在" }
+        timetableDao.upsert(timetable.copy(
+            periodsCsv = Timetable.serializePeriods(scheme.periods),
+            periodDurationMinutes = scheme.durationMinutes
+        ))
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val settings: Flow<AppSettings> = context.dataStore.data.flatMapLatest { prefs ->

@@ -279,13 +279,28 @@ fun ModalBottomSheet(
     }
 }
 
+enum class DialogActionRole { Primary, Secondary, Destructive }
+
+data class DialogAction(
+    val label: String,
+    val onClick: () -> Unit,
+    val role: DialogActionRole = DialogActionRole.Secondary,
+    val enabled: Boolean = true
+)
+
 @Composable
 fun AlertDialog(
     onDismissRequest: () -> Unit,
     title: @Composable (() -> Unit)? = null,
     text: @Composable (() -> Unit)? = null,
     confirmButton: @Composable () -> Unit,
-    dismissButton: @Composable (() -> Unit)? = null
+    dismissButton: @Composable (() -> Unit)? = null,
+    onBackRequest: (() -> Unit)? = null,
+    actionShape: Shape = Capsule(),
+    confirmButtonEmphasized: Boolean = true,
+    confirmButtonRole: DialogActionRole = if (confirmButtonEmphasized) DialogActionRole.Primary else DialogActionRole.Secondary,
+    dismissButtonRole: DialogActionRole = DialogActionRole.Secondary,
+    additionalActions: List<DialogAction> = emptyList()
 ) {
     var dismissRequested by remember { mutableStateOf(false) }
     var pendingDismissAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -325,11 +340,11 @@ fun AlertDialog(
     GlassOverlayPortal(OverlayDestination.DIALOG) {
         BackHandler(
             enabled = visibility.currentState || visibility.targetState,
-            onBack = { dismissAnimated() }
+            onBack = { onBackRequest?.invoke() ?: dismissAnimated() }
         )
         CompositionLocalProvider(LocalDialogDismissController provides dismissController) {
             Box(
-                Modifier.fillMaxSize(),
+                Modifier.fillMaxSize().imePadding(),
                 contentAlignment = Alignment.Center
             ) {
                 AnimatedVisibility(
@@ -344,7 +359,7 @@ fun AlertDialog(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { dismissAnimated() }
+                                onClick = { onBackRequest?.invoke() ?: dismissAnimated() }
                             )
                     )
                 }
@@ -368,14 +383,13 @@ fun AlertDialog(
                         modifier = Modifier
                             .widthIn(max = 480.dp)
                             .fillMaxWidth()
-                            .imePadding()
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                                 onClick = {}
                             ),
                         shape = RoundedRectangle(32.dp),
-                        shadowElevation = 24.dp,
+                        shadowElevation = 0.dp,
                         style = OverlayGlassStyle.DIALOG
                     ) {
                         Column {
@@ -388,12 +402,12 @@ fun AlertDialog(
                             }
                             if (text != null) {
                                 CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurfaceVariant) {
-                                    Box(Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
+                                    Box(Modifier.weight(1f, fill = false).padding(horizontal = 24.dp, vertical = 12.dp)) {
                                         text()
                                     }
                                 }
                             }
-                            LibraryDialogActions(dismissButton, confirmButton)
+                            LibraryDialogActions(dismissButton, confirmButton, actionShape, confirmButtonRole, dismissButtonRole, additionalActions)
                         }
                     }
                 }
@@ -428,7 +442,7 @@ internal fun GlassProgressDialog(
                     .fillMaxWidth()
                     .then(modifier),
                 shape = RoundedRectangle(28.dp),
-                shadowElevation = 24.dp,
+                shadowElevation = 0.dp,
                 style = OverlayGlassStyle.DIALOG
             ) {
                 Row(
@@ -769,7 +783,7 @@ fun NumberWheelPickerDialog(
                                 onClick = {}
                             ),
                         shape = RoundedRectangle(32.dp),
-                        shadowElevation = 24.dp,
+                        shadowElevation = 0.dp,
                         style = OverlayGlassStyle.DIALOG
                     ) {
                         Column {
@@ -975,54 +989,60 @@ private fun libraryOverlayDimColor(): Color = if (LiquidTheme.colorScheme.isDark
 @Composable
 private fun LibraryDialogActions(
     dismissButton: (@Composable () -> Unit)?,
-    confirmButton: @Composable () -> Unit
+    confirmButton: @Composable () -> Unit,
+    actionShape: Shape = Capsule(),
+    confirmButtonRole: DialogActionRole = DialogActionRole.Primary,
+    dismissButtonRole: DialogActionRole = DialogActionRole.Secondary,
+    additionalActions: List<DialogAction> = emptyList()
 ) {
-    val isLightTheme = !LiquidTheme.colorScheme.isDark
-    val contentColor = LiquidTheme.colorScheme.onSurface
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
-    val containerColor = if (isLightTheme) {
-        Color(0xFFFAFAFA).copy(alpha = 0.20f)
-    } else {
-        Color(0xFF121212).copy(alpha = 0.20f)
-    }
-
-    Row(
-        Modifier
-            .padding(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 24.dp)
-            .fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (dismissButton != null) {
-            Box(
-                Modifier
-                    .clip(Capsule())
-                    .background(containerColor)
-                    .height(48.dp)
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                CompositionLocalProvider(
-                    LocalLibraryDialogAction provides true,
-                    LocalLibraryDialogActionColor provides contentColor,
-                    content = dismissButton
-                )
+    val padding = Modifier.padding(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 24.dp).fillMaxWidth()
+    if (additionalActions.isNotEmpty()) {
+        Column(padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LibraryDialogAction(Modifier.fillMaxWidth(), actionShape, confirmButtonRole, confirmButton)
+            additionalActions.forEach { action ->
+                LibraryDialogAction(Modifier.fillMaxWidth(), actionShape, action.role) {
+                    TextButton(onClick = action.onClick, enabled = action.enabled) { Text(action.label) }
+                }
             }
+            if (dismissButton != null) LibraryDialogAction(Modifier.fillMaxWidth(), actionShape, dismissButtonRole, dismissButton)
         }
-        Box(
-            Modifier
-                .clip(Capsule())
-                .background(accentColor)
-                .height(48.dp)
-                .weight(1f),
-            contentAlignment = Alignment.Center
-        ) {
-            CompositionLocalProvider(
-                LocalLibraryDialogAction provides true,
-                LocalLibraryDialogActionColor provides Color.White,
-                content = confirmButton
-            )
+    } else {
+        Row(padding, horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (dismissButton != null) LibraryDialogAction(Modifier.weight(1f), actionShape, dismissButtonRole, dismissButton)
+            LibraryDialogAction(Modifier.weight(1f), actionShape, confirmButtonRole, confirmButton)
         }
+    }
+}
+
+@Composable
+private fun LibraryDialogAction(
+    modifier: Modifier,
+    shape: Shape,
+    role: DialogActionRole,
+    content: @Composable () -> Unit
+) {
+    val colors = LiquidTheme.colorScheme
+    val background = when (role) {
+        DialogActionRole.Primary -> colors.primary
+        DialogActionRole.Secondary -> colors.onSurface.copy(alpha = if (colors.isDark) 0.10f else 0.06f)
+        DialogActionRole.Destructive -> colors.error.copy(alpha = 0.12f)
+    }
+    val foreground = when (role) {
+        DialogActionRole.Primary -> colors.onPrimary
+        DialogActionRole.Secondary -> colors.onSurface
+        DialogActionRole.Destructive -> colors.error
+    }
+    Box(
+        modifier.clip(shape).background(background)
+            .height(48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CompositionLocalProvider(
+            LocalLibraryDialogAction provides true,
+            LocalLibraryDialogActionColor provides foreground,
+            LocalLibraryDialogActionShape provides shape,
+            content = content
+        )
     }
 }
 

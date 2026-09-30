@@ -41,6 +41,13 @@ class PeriodUtilsTest {
     }
 
     @Test
+    fun validateRejectsEmptyAndMidnightWrappingPeriods() {
+        assertNotNull(PeriodUtils.validate(emptyList(), 45))
+        assertNotNull(PeriodUtils.validate(listOf(LocalTime.of(23, 45)), 45))
+        assertNotNull(PeriodUtils.validate(listOf(LocalTime.of(8, 0)), 24 * 60))
+    }
+
+    @Test
     fun calculateCourseProgressCalculatesCorrectRatio() {
         val periods = PeriodUtils.build(
             listOf(LocalTime.of(8, 0), LocalTime.of(8, 55)),
