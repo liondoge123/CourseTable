@@ -1,29 +1,31 @@
 # CourseTable 项目交接
 
-更新日期：2026-09-23
+更新日期：2026-09-30
 仓库：[liondoge123/CourseTable](https://github.com/liondoge123/CourseTable)
 
 ## 当前状态
 
-- v1.6.4 正式构建已由 `scripts/build-apk.ps1 release` 生成；安装包与校验和作为 GitHub Release 资产发布，源码提交不包含 APK。
-- `version.properties` 为 `VERSION_NAME=1.6.4`、`VERSION_CODE=123`、`LAST_RELEASE_VERSION=1.6.4`；Git 标签为 `v1.6.4`。仓库 README 不记录易过时的当前版本和构建步骤。
+- v1.7.0 正式构建已由 `scripts/build-apk.ps1 release -VersionName 1.7.0` 生成；待将代码、带注释标签和安装包同步至 GitHub。
+- `version.properties` 为 `VERSION_NAME=1.7.0`、`VERSION_CODE=130`、`LAST_RELEASE_VERSION=1.7.0`；发布标签为 `v1.7.0`。
+- README 已补充时间方案功能；用户更新说明见 [`docs/releases/v1.7.0.md`](docs/releases/v1.7.0.md)，按钮约定见 [`docs/UI_BUTTON_GUIDELINES.md`](docs/UI_BUTTON_GUIDELINES.md)。
 
 正式产物位于 `app/build/outputs/apk/release`：
 
 | ABI | 字节数 | SHA-256 |
 | --- | ---: | --- |
-| arm64-v8a | 21,064,547 | `3367aa7fe6742c1a1f79f24a7365d28233ec474117dcd17f09c4a502c39d7a0e` |
-| armeabi-v7a | 19,721,169 | `c6f4be34f9217abac6a7d81bdf1875b697952451757cf6d208a1a8f04452a06e` |
-| universal | 30,182,766 | `34bde00e49701619853ad82383d9b0504a52e057c843f21e1e15f11ab0964fab` |
+| arm64-v8a | 21,077,295 | `ddcdff6e866d24ad4c23d92967fc6ef84075b20980151f9312036d4aa02601fb` |
+| armeabi-v7a | 19,733,917 | `f7a51318b43f55bba9ecb083a61bac7be09d6b8a1ecb69e631f0ae2467345797` |
+| universal | 30,195,518 | `c327e271010583d8e9cfff646a4b7355722d82969eb527a5c635eb486c305859` |
 
-文件名均为 `CourseTable-v1.6.4-{ABI}-release.apk`，校验和文件为同目录的 `SHA256SUMS.txt`。
+文件名均为 `CourseTable-v1.7.0-{ABI}-release.apk`，校验和文件为同目录的 `SHA256SUMS.txt`。源码提交不包含 APK。
 
 ## 本轮源码变化
 
-- **导入确认**：图片识别只显示弹窗进度；校对清单简化顶部信息，来源名称与带数量的筛选标签分开显示，零项分类隐藏，分类清空时回到“全部”。放大后的标签只用于该页面。
-- **菜单和抽屉**：课表选择与“更多”改用锚定玻璃菜单，并移除菜单外部阴影。菜单退出后才打开新增课程抽屉；新增标题、保存操作与校对区分。原图、来源片段、重新识别确认和识别范围使用液态玻璃抽屉。
-- **背景层级**：选择识别范围时导入确认页保持在抽屉后方；嵌套覆盖层单独采样下方场景，使抽屉上再弹出的窗口仍有玻璃背景。退出原图后保留未保存的课程编辑内容。
-- **依赖**：Android Gradle Plugin 调整到 9.4.1；没有数据库迁移、包名变更或公开导入数据结构变更。
+- **时间方案**：在“节次时间”窗口内先展示方案列表，点击名称进入编辑，独立选用按钮切换当前课表。方案支持新建、重命名、编辑、删除和自定义时间另存；编辑保存不自动切换。
+- **存储**：方案作为全局快照保存在 Preferences DataStore，原有课表节次时间仍保存在 Room。沿用已有课表数据，无数据库迁移。当前 JSON 备份没有包含方案列表；应用到课表的时间随课表备份。
+- **图标与控件**：桌面图标更新为蓝色渐变及等长的长/短课程块，主题图标使用独立镂空矢量。选中标记采用圆圈内的勾，操作按钮统一为胶囊，取消/关闭的次要样式不加描边，危险操作使用红色语义。
+- **弹窗与输入法**：移除居中弹窗外阴影，识别失败的多个操作独立排列。输入法可见性使用派生状态避免动画逐帧触发重组，避让空间移到弹窗外层，优先保留底部操作区域；关闭输入法后清除焦点。
+- **校验**：节次设置拒绝空列表、重叠和跨午夜，并修正提示中的节次编号。
 
 导入清单的布局、队列和数据生命周期见 [`docs/IMPORT_REVIEW.md`](docs/IMPORT_REVIEW.md)。
 
@@ -38,9 +40,10 @@
 
 ## 验证与待验证项
 
-- 正式构建执行了 `:app:testDebugUnitTest`（67 个测试通过）、`:app:lintDebug`、`:app:compileDebugAndroidTestKotlin`、R8 与资源压缩；脚本复核包名、版本、SDK、ABI、V2 签名证书和三种 APK 的 SHA-256，且均低于 31,500,000 字节阈值。日志在 `app/build/logs/release-b123.log`。
-- 已在 Android 14 `Medium_Phone` 模拟器检查导入确认页筛选标签的实际布局；`UnifiedImportReviewTest` 12 项、`VisualImportReviewTest` 10 项和 `OverlayGlassPresentationTest` 2 项通过。Debug 测试使用只在 Debug 构建中声明的 `FileProvider` 提供 `content://` 样本。截图和临时验证文件保留在本地，不进入源码提交。
-- arm64-v8a 正式包已安装到 Android 14 模拟器并成功启动、显示课表。仍需在实体 ARM 设备上验证导入、菜单、抽屉、原图手势与提醒；教务登录需要真实学校环境复核。重点检查深浅色、窄屏、键盘弹出以及连续识别/取消后的资源释放。
+- 正式构建执行 JVM 单元测试（73 项通过）、Android 测试代码编译、Lint、R8 与资源压缩。脚本复核包名、版本、SDK、ABI、V2 签名证书和三种 APK 的 SHA-256，均低于 31,500,000 字节阈值。日志在 `app/build/logs/release-b130.log`。
+- 开发期间在 Android 14 独立模拟器运行了时间方案交互 7 项、按钮布局/主题色 1 项及输入法可见性/焦点 2 项测试。验证了编辑与选用分离、保存失败保留内容、返回列表、增删节次、危险删除确认，以及输入法关闭后失焦和再次聚焦。
+- 输入法测试验证状态更新和交互行为，没有测量实体设备帧率。实体 ARM 设备仍需验证输入法动画、导入、提醒及正式包混淆后的功能；教务登录需要真实学校环境复核。
+- 方案列表当前仍支持从详情返回列表；在详情点击遮罩也会退回列表。辅助的“添加节次、另存为方案、重置、重新选择学校”按钮仍沿用显式描边样式，此轮没有继续扩大界面改动。
 
 ## 后续版本发布
 
