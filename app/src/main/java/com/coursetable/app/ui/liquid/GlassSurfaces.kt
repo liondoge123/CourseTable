@@ -113,6 +113,7 @@ internal fun OverlayGlassSurface(
     contentColor: Color = LiquidTheme.colorScheme.onSurface,
     shadowElevation: Dp = 20.dp,
     style: OverlayGlassStyle = OverlayGlassStyle.DIALOG,
+    refractionEnabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val backdrop = LocalOverlayGlassBackdrop.current ?: LocalGlassBackdrop.current
@@ -158,7 +159,7 @@ internal fun OverlayGlassSurface(
                         saturation = if (isLightTheme) 1.18f else 1.12f
                     )
                     blur(blurRadius.toPx())
-                    if (capability == GlassCapability.FULL && style != OverlayGlassStyle.SHEET) {
+                    if (refractionEnabled && capability == GlassCapability.FULL && style != OverlayGlassStyle.SHEET) {
                         lens(
                             refractionHeight = refractionHeight.toPx(),
                             refractionAmount = refractionAmount.toPx(),

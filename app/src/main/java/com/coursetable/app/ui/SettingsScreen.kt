@@ -1,7 +1,6 @@
 package com.coursetable.app.ui
 
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -69,6 +68,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class SettingsSubpage {
+    TIMETABLE_MANAGE,
+    ABOUT
+}
+
 @Composable
 fun SettingsScreen(
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
@@ -113,15 +117,19 @@ fun SettingsScreen(
     val timeSchemes by settingsRepo.periodTimeSchemes.collectAsState(initial = emptyList())
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showThemeModePicker by remember { mutableStateOf(false) }
-    var showTimetableManage by remember { mutableStateOf(false) }
+    var activeSubpage by rememberSaveable { mutableStateOf<SettingsSubpage?>(null) }
+    var displayedSubpage by remember { mutableStateOf<SettingsSubpage?>(null) }
+    if (activeSubpage != null) {
+        displayedSubpage = activeSubpage
+    }
     var showPermDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose { onSubpageChanged(false) }
     }
 
-    LaunchedEffect(showTimetableManage) {
-        onSubpageChanged(showTimetableManage)
+    LaunchedEffect(activeSubpage) {
+        onSubpageChanged(activeSubpage != null)
     }
 
     // 提醒排程状态（设置变更后延迟刷新，等待异步重排完成）
@@ -264,7 +272,7 @@ fun SettingsScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(LiquidButtonShape)
                                 .clickable {
                                     dismissController?.dismiss {
                                         scope.launch { settingsRepo.save(themeMode = mode.key) }
@@ -404,36 +412,46 @@ fun SettingsScreen(
             }
     }
 
-    AnimatedContent(
-        targetState = showTimetableManage,
-        transitionSpec = fullscreenSubpageTransitionSpec(),
-        label = "SettingsToTimetableManage"
-    ) { isManage ->
-        if (isManage) {
-            BackHandler { showTimetableManage = false }
-            TimetableManageScreen(
-                timetables = timetables,
-                activeId = settings.timetableId,
-                onBack = { showTimetableManage = false },
-                onSwitch = { id -> scope.launch { settingsRepo.setActiveTimetable(id) } },
-                onCreate = { name ->
-                    scope.launch {
-                        val id = timetableRepo.create(name)
-                        settingsRepo.setActiveTimetable(id)
-                    }
-                },
-                onRename = { id, name -> scope.launch { timetableRepo.rename(id, name) } },
-                onDelete = { table ->
-                    scope.launch {
-                        timetableRepo.delete(table.id)
-                        if (table.id == settings.timetableId) {
-                            timetableRepo.allOnce().firstOrNull()?.let {
-                                settingsRepo.setActiveTimetable(it.id)
+    PredictivePageTransition(
+        targetState = activeSubpage != null,
+        onBack = { activeSubpage = null }
+    ) { isChild ->
+        if (isChild) {
+            when (displayedSubpage ?: activeSubpage) {
+                SettingsSubpage.TIMETABLE_MANAGE -> {
+                    TimetableManageScreen(
+                        timetables = timetables,
+                        activeId = settings.timetableId,
+                        onBack = { activeSubpage = null },
+                        onSwitch = { id -> scope.launch { settingsRepo.setActiveTimetable(id) } },
+                        onCreate = { name ->
+                            scope.launch {
+                                val id = timetableRepo.create(name)
+                                settingsRepo.setActiveTimetable(id)
+                            }
+                        },
+                        onRename = { id, name -> scope.launch { timetableRepo.rename(id, name) } },
+                        onDelete = { table ->
+                            scope.launch {
+                                timetableRepo.delete(table.id)
+                                if (table.id == settings.timetableId) {
+                                    timetableRepo.allOnce().firstOrNull()?.let {
+                                        settingsRepo.setActiveTimetable(it.id)
+                                    }
+                                }
                             }
                         }
-                    }
+                    )
                 }
-            )
+                SettingsSubpage.ABOUT -> {
+                    AboutScreen(
+                        appVersionName = appVersionName,
+                        onBack = { activeSubpage = null },
+                        bottomContentPadding = bottomContentPadding
+                    )
+                }
+                null -> Unit
+            }
         } else {
             FullscreenPageContainer {
                 Column(
@@ -462,14 +480,16 @@ fun SettingsScreen(
                 icon = Icons.Filled.CalendarMonth,
                 title = "课表管理",
                 subtitle = "当前：${settings.timetableName} · 共 ${timetables.size} 个课表",
-                onClick = { showTimetableManage = true }
+                onClick = { activeSubpage = SettingsSubpage.TIMETABLE_MANAGE }
             )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.DateRange,
                 title = "学期开始日期",
                 subtitle = settings.semesterStart.format(DateTimeFormatter.ISO_LOCAL_DATE),
                 onClick = { showDatePicker = true }
             )
+            SettingsDivider()
             StepperItem(
                 icon = Icons.Filled.ViewWeek,
                 title = "学期总周数",
@@ -481,6 +501,7 @@ fun SettingsScreen(
                     scope.launch { settingsRepo.save(totalWeeks = (settings.totalWeeks + 1).coerceAtMost(30)) }
                 }
             )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.Schedule,
                 title = "节次时间",
@@ -498,6 +519,7 @@ fun SettingsScreen(
                 alignLeft = settings.cardAlignLeft,
                 onChange = { scope.launch { settingsRepo.save(cardAlignLeft = it) } }
             )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.Visibility,
                 title = "显示非本周课程",
@@ -537,6 +559,7 @@ fun SettingsScreen(
                 }
             )
             if (settings.reminderEnabled) {
+                SettingsDivider()
                 StepperItem(
                     icon = Icons.Filled.Schedule,
                     title = "提前时间",
@@ -573,6 +596,7 @@ fun SettingsScreen(
                         reminderStatus.firedLog.forEach { append("\n  $it") }
                     }
                 }
+                SettingsDivider()
                 SettingItem(
                     icon = Icons.Filled.EventNote,
                     title = "排程状态",
@@ -580,6 +604,7 @@ fun SettingsScreen(
                     onClick = { statusTick++ }
                 )
 
+                SettingsDivider()
                 SettingItem(
                     icon = Icons.Filled.Send,
                     title = "发送测试提醒",
@@ -596,6 +621,7 @@ fun SettingsScreen(
                     permIssues > 0 -> "$permIssues 项待处理"
                     else -> "全部正常"
                 }
+                SettingsDivider()
                 SettingItem(
                     icon = Icons.Filled.Security,
                     title = "权限检查",
@@ -614,6 +640,7 @@ fun SettingsScreen(
                 subtitle = ThemeMode.fromKey(settings.themeMode).label,
                 onClick = { showThemeModePicker = true }
             )
+            SettingsDivider()
             ThemeColorItem(
                 selected = ThemeColor.fromKey(settings.themeColor),
                 onSelect = { color -> scope.launch { settingsRepo.save(themeColor = color.key) } }
@@ -629,6 +656,7 @@ fun SettingsScreen(
                     exportBackup.launch("coursetable_backup_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.json")
                 }
             )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.IosShare,
                 title = "导出 ICS 日历",
@@ -637,6 +665,7 @@ fun SettingsScreen(
                     exportIcs.launch("coursetable_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.ics")
                 }
             )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.DeleteForever,
                 title = "清空所有课程",
@@ -649,8 +678,9 @@ fun SettingsScreen(
         SettingsGroup(title = "关于") {
             SettingItem(
                 icon = Icons.Filled.Info,
-                title = "CourseTable $appVersionName",
-                subtitle = "Liquid Glass 界面由 AndroidLiquidGlass / Backdrop 2.0.1 驱动\nBackdrop © Kyant · Apache 2.0；Lucide Icons 1.45.0 · ISC"
+                title = "关于 CourseTable",
+                subtitle = "v$appVersionName · 开源协议与项目信息",
+                onClick = { activeSubpage = SettingsSubpage.ABOUT }
             )
         }
     }
@@ -666,8 +696,8 @@ fun SettingsScreen(
             durationMinutes = settings.periodDurationMinutes,
             onSave = { settingsRepo.savePeriodTimeScheme(it) },
             onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
-            onSaveCurrent = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
-            onDelete = { settingsRepo.deletePeriodTimeScheme(it) },
+            onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },
+            onDelete = { settingsRepo.deletePeriodTimeScheme(it, timetableId) },
             onDismiss = { showPeriodsEditor = false }
         )
     }
@@ -732,10 +762,17 @@ private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp)
         )
-        SectionFrame {
+        SectionFrame(outlined = false) {
             Column { content() }
         }
     }
+}
+
+/** 分组内分隔线，与各设置行的文字起点对齐。 */
+@Composable
+private fun SettingsDivider() {
+    // 16dp row inset + 22dp icon + 14dp gap: start at the text column.
+    HorizontalDivider(Modifier.padding(start = 52.dp, end = 16.dp))
 }
 
 /** 带图标、标题、副标题与尾部控件的设置行 */
@@ -807,7 +844,7 @@ private fun ThemeColorItem(
                 modifier = Modifier.size(22.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(14.dp))
             Column {
                 Text("主题色彩", style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -880,7 +917,7 @@ private fun StepperItem(
             modifier = Modifier.size(22.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(14.dp))
         Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         IconButton(onClick = onDecrease) {
             Icon(Icons.Filled.Remove, contentDescription = "减", modifier = Modifier.size(20.dp))
@@ -911,7 +948,7 @@ private fun AlignItem(
             modifier = Modifier.size(22.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         Text(
             text = "课程卡片文字对齐",
             style = MaterialTheme.typography.bodyLarge,

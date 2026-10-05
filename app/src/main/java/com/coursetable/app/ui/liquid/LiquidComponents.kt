@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -304,7 +306,9 @@ fun OutlinedTextField(
     placeholder: @Composable (() -> Unit)? = null,
     singleLine: Boolean = false,
     shape: Shape = RoundedCornerShape(12.dp),
-    visualTransformation: VisualTransformation = VisualTransformation.None
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    showUnfocusedBorder: Boolean = true,
+    containerAlpha: Float = 1f
 ) {
     val colors = LiquidTheme.colorScheme
     var focused by remember { mutableStateOf(false) }
@@ -315,7 +319,8 @@ fun OutlinedTextField(
         label = "text-field-background"
     )
     val fieldBorder by animateColorAsState(
-        targetValue = if (focused) colors.primary.copy(alpha = 0.78f) else colors.outlineVariant,
+        targetValue = if (focused) colors.primary.copy(alpha = 0.78f)
+            else if (showUnfocusedBorder) colors.outlineVariant else Color.Transparent,
         label = "text-field-border"
     )
     BasicTextField(
@@ -323,6 +328,7 @@ fun OutlinedTextField(
         onValueChange = onValueChange,
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
+            .keepEditingOnTap()
             .onFocusChanged { focused = it.isFocused },
         enabled = enabled,
         singleLine = singleLine,
@@ -333,7 +339,7 @@ fun OutlinedTextField(
             Column(
                 Modifier
                     .clip(shape)
-                    .background(fieldBackground)
+                    .background(fieldBackground.copy(alpha = containerAlpha))
                     .border(if (focused) 1.5.dp else 1.dp, fieldBorder, shape)
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -469,7 +475,9 @@ fun <T> fullscreenSubpageTransitionSpec(
 }
 
 /**
- * 全屏页面容器：自带完整的液态磨砂与渐变背景，
+ * 全屏页面容器：背景覆盖整个窗口，系统栏安全留白仅应用于内容层。
+ * 返回动画必须包住本容器，不能在动画外先扣除系统栏高度。
+ * 自带完整的液态磨砂与渐变背景，
  * 确保页面在进入/退出转场滑动时背景跟随页面同步平移，
  * 彻底防止滑动过程中底层页面穿透透视的问题。
  */
@@ -482,6 +490,10 @@ fun FullscreenPageContainer(
         modifier = modifier.fillMaxSize()
     ) {
         LiquidAmbientBackground()
-        content()
+        // Keep IME avoidance with each editor/sheet, as before; only the system bars
+        // and display cutout belong to the page's inner safe area.
+        Box(Modifier.fillMaxSize().systemBarsPadding().displayCutoutPadding()) {
+            content()
+        }
     }
 }

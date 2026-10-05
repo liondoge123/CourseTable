@@ -1,12 +1,20 @@
 package com.coursetable.app
 
 import com.coursetable.app.data.AppSettings
+import com.coursetable.app.data.scheduledWeeks
+import com.coursetable.app.data.withScheduledWeeks
 import com.coursetable.app.importer.*
 import com.coursetable.app.ui.*
 import org.junit.Assert.*
 import org.junit.Test
 
 class ImportReviewBehaviorTest {
+    @Test fun editedIrregularWeeksSurviveImportReviewConversion() {
+        val edited = candidateToCourse(course("custom")).withScheduledWeeks(listOf(1, 4, 8))
+        val reviewed = courseToCandidate(edited)
+        assertEquals(listOf(1, 4, 8), candidateToCourse(reviewed).scheduledWeeks())
+        assertTrue(reviewed.fieldErrors(AppSettings()).isEmpty())
+    }
     private fun course(id: String, start: Int = 1, duration: Int = 2) = CandidateCourse(
         "课程$id", dayOfWeek = 1, startSection = start, duration = duration,
         startWeek = 1, endWeek = 18, weekType = 0, draftId = id)

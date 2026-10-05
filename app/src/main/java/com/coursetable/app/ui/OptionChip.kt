@@ -23,11 +23,13 @@ fun OptionChip(
     onClick: () -> Unit,
     label: String,
     modifier: Modifier = Modifier,
-    large: Boolean = false
+    large: Boolean = false,
+    outlined: Boolean = true
 ) {
     val shape = remember(large) { RoundedCornerShape(if (large) 12.dp else 10.dp) }
     val colors = LiquidTheme.colorScheme
-    val bg = if (selected) colors.primary.copy(alpha = 0.14f) else colors.surface
+    val bg = if (selected) colors.primary.copy(alpha = if (outlined) 0.14f else 0.18f)
+        else if (outlined) colors.surface else colors.surfaceContainerHigh.copy(alpha = 0.38f)
     val textCol = if (selected) colors.primary else colors.onSurfaceVariant
     val borderCol = if (selected) colors.primary.copy(alpha = 0.45f) else colors.outlineVariant
 
@@ -35,7 +37,7 @@ fun OptionChip(
         modifier = modifier
             .clip(shape)
             .background(bg)
-            .border(1.dp, borderCol, shape)
+            .then(if (outlined) Modifier.border(1.dp, borderCol, shape) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = if (large) 10.dp else 6.dp, vertical = if (large) 8.dp else 4.dp),
         contentAlignment = Alignment.Center

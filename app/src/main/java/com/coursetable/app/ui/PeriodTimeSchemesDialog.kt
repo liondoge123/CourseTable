@@ -6,11 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +23,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.PeriodTimeScheme
@@ -27,10 +34,11 @@ import com.coursetable.app.data.PeriodUtils
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
-import java.time.LocalTime
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+
+private val SchemeRowCornerRadius = 8.dp
 
 /** 列表和编辑共享一个窗口；编辑保存与课表选用分别执行。 */
 @Composable
@@ -44,10 +52,12 @@ fun PeriodTimeSchemesDialog(
     onDelete: suspend (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val availableSchemes = PeriodTimeScheme.withDefault(schemes, PeriodTimeScheme.defaultFor(0, periods, durationMinutes))
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf<PeriodTimeScheme?>(null) }
     var editingCurrent by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableStateOf<Int?>(null) }
+    var previewUniformDuration by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<PeriodTimeScheme?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -55,6 +65,7 @@ fun PeriodTimeSchemesDialog(
     fun returnToList() {
         draft = null
         editingIndex = null
+        previewUniformDuration = false
         error = null
     }
 
@@ -62,6 +73,7 @@ fun PeriodTimeSchemesDialog(
         draft = scheme
         editingCurrent = current
         editingIndex = null
+        previewUniformDuration = false
         error = null
     }
 
@@ -84,12 +96,14 @@ fun PeriodTimeSchemesDialog(
     }
 
     fun saveDraft() {
+        if (busy) return
         val item = draft ?: return
         val normalized = item.copy(name = item.name.trim())
         error = when {
             !editingCurrent && normalized.name.isBlank() -> "请输入方案名称"
-            !editingCurrent && schemes.any { it.id != item.id && it.name == normalized.name } -> "已有同名方案"
-            PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(normalized))) != listOf(normalized) -> "请检查节次时间，不能重叠或跨越午夜"
+            !editingCurrent && availableSchemes.any { it.id != item.id && it.name == normalized.name } -> "已有同名方案"
+            PeriodUtils.validatePeriods(normalized.periods) != null -> PeriodUtils.validatePeriods(normalized.periods)
+            PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(normalized))) != listOf(normalized) -> "请检查方案信息"
             else -> null
         }
         if (error != null) return
@@ -100,10 +114,14 @@ fun PeriodTimeSchemesDialog(
         )
     }
 
+    val presentedDraft = draft
+    val presentedEditingCurrent = editingCurrent
     AlertDialog(
         onDismissRequest = onDismiss,
         actionShape = LiquidButtonShape,
         confirmButtonEmphasized = draft != null,
+        fixedEditorFrame = draft != null,
+        pageTransitionKey = presentedDraft?.id ?: "scheme-list",
         onBackRequest = when {
             busy -> ({})
             draft != null -> ({ returnToList() })
@@ -111,26 +129,26 @@ fun PeriodTimeSchemesDialog(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (draft != null) {
-                    IconButton(onClick = { returnToList() }, enabled = !busy) {
+                if (presentedDraft != null) {
+                    IconButton(onClick = { returnToList() }, enabled = !busy, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回方案列表")
                     }
                 }
-                Text(if (draft == null) "节次时间" else if (editingCurrent) "当前自定义" else "编辑方案")
+                Text(if (presentedDraft == null) "节次时间" else if (presentedDraft.isDefault) PeriodTimeScheme.DEFAULT_NAME else if (presentedEditingCurrent) "当前自定义" else "编辑方案")
             }
         },
         text = {
-            val item = draft
+            val item = presentedDraft
             if (item == null) {
                 Column(
                     Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.Top
                 ) {
-                    if (schemes.none { it.matches(periods, durationMinutes) }) {
+                    if (availableSchemes.none { it.matches(periods, durationMinutes) }) {
                         Row(
-                            Modifier.fillMaxWidth().clickable(enabled = !busy) {
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) {
                                 openEditor(PeriodTimeScheme("current", "当前自定义", periods, durationMinutes), current = true)
-                            }.padding(vertical = 8.dp),
+                            }.heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
@@ -139,17 +157,16 @@ fun PeriodTimeSchemesDialog(
                             }
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑当前时间", modifier = Modifier.size(20.dp))
                         }
-                        HorizontalDivider()
+                        HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
-                    if (schemes.isEmpty()) Text("暂无方案", style = MaterialTheme.typography.bodySmall)
-                    schemes.forEach { scheme ->
+                    availableSchemes.forEach { scheme ->
                         val selected = scheme.matches(periods, durationMinutes)
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) { openEditor(scheme, current = scheme.isDefault) }
+                                .heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(Modifier.weight(1f).clickable(enabled = !busy) { openEditor(scheme) }
-                                .padding(vertical = 8.dp)) {
+                            Column(Modifier.weight(1f)) {
                                 Text(scheme.name, style = MaterialTheme.typography.titleSmall)
                                 Text("${scheme.periods.size} 节", style = MaterialTheme.typography.bodySmall)
                             }
@@ -157,12 +174,13 @@ fun PeriodTimeSchemesDialog(
                                 onClick = { runOperation({ onApply(scheme) }) },
                                 enabled = !busy && !selected
                             ) { Text(if (selected) "已选用" else "选用") }
-                            IconButton(onClick = { deleteTarget = scheme }, enabled = !busy) {
+                            if (!scheme.isDefault) IconButton(onClick = { deleteTarget = scheme }, enabled = !busy) {
                                 Icon(Icons.Filled.Delete, "删除${scheme.name}", modifier = Modifier.size(18.dp))
                             }
                         }
-                        HorizontalDivider()
+                        HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
+                    Spacer(Modifier.height(10.dp))
                     Button(
                         onClick = { openEditor(PeriodTimeScheme(UUID.randomUUID().toString(), "", periods, durationMinutes)) },
                         enabled = !busy,
@@ -172,64 +190,76 @@ fun PeriodTimeSchemesDialog(
                 }
             } else {
                 Column(
-                    Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.Top
                 ) {
-                    if (!editingCurrent) {
+                    if (!presentedEditingCurrent) {
                         OutlinedTextField(
                             value = item.name,
                             onValueChange = { draft = item.copy(name = it); error = null },
                             label = { Text("方案名称") },
+                            showUnfocusedBorder = false,
+                            containerAlpha = 0.55f,
                             singleLine = true,
                             enabled = !busy,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(Modifier.height(8.dp))
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("每节课时长", style = MaterialTheme.typography.bodyMedium)
+                        Text("默认课时长", style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.weight(1f))
                         IconButton(onClick = {
                             val duration = (item.durationMinutes - 5).coerceIn(20, 90)
-                            draft = item.copy(durationMinutes = duration, periods = PeriodUtils.build(item.periods.map { it.start }, duration))
+                            draft = item.copy(durationMinutes = duration)
+                            error = null
                         }, enabled = !busy && item.durationMinutes > 20) {
                             Icon(Icons.Filled.Remove, "减 5 分钟", modifier = Modifier.size(20.dp))
                         }
                         Text("${item.durationMinutes} 分钟", style = MaterialTheme.typography.titleSmall)
                         IconButton(onClick = {
                             val duration = (item.durationMinutes + 5).coerceIn(20, 90)
-                            draft = item.copy(durationMinutes = duration, periods = PeriodUtils.build(item.periods.map { it.start }, duration))
+                            draft = item.copy(durationMinutes = duration)
+                            error = null
                         }, enabled = !busy && item.durationMinutes < 90) {
                             Icon(Icons.Filled.Add, "加 5 分钟", modifier = Modifier.size(20.dp))
                         }
                     }
-                    HorizontalDivider()
+                    TextButton(onClick = { previewUniformDuration = true }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth()) { Text("统一已有节次课时长…") }
+                    HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     item.periods.forEachIndexed { index, period ->
                         Row(
-                            Modifier.fillMaxWidth().clickable(enabled = !busy) { editingIndex = index }
-                                .padding(vertical = 6.dp),
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) { editingIndex = index }
+                                .testTag("period-row-${index + 1}")
+                                .heightIn(min = 56.dp).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("第 ${index + 1} 节", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(64.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(period.start.format(PeriodTime.TIME_FMT), color = MaterialTheme.colorScheme.primary)
-                                Text("结束 ${period.end.format(PeriodTime.TIME_FMT)}", style = MaterialTheme.typography.bodySmall)
-                            }
+                            Text("第 ${index + 1} 节课", style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f))
+                            Text("${period.start.format(PeriodTime.TIME_FMT)} - ${period.end.format(PeriodTime.TIME_FMT)}",
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, modifier = Modifier.padding(start = 8.dp))
                             if (item.periods.size > 1) {
                                 IconButton(onClick = {
                                     draft = item.copy(periods = item.periods.filterIndexed { i, _ -> i != index })
-                                }, enabled = !busy) {
-                                    Icon(Icons.Filled.Remove, "删除第 ${index + 1} 节", modifier = Modifier.size(18.dp))
+                                }, enabled = !busy, modifier = Modifier.size(48.dp)) {
+                                    Icon(Icons.Filled.Remove, "删除第 ${index + 1} 节", modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.error)
                                 }
                             }
-                            Icon(Icons.Filled.Edit, "编辑第 ${index + 1} 节", modifier = Modifier.size(18.dp))
                         }
-                        if (index != item.periods.lastIndex) HorizontalDivider()
+                        if (index != item.periods.lastIndex) HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
+                    Spacer(Modifier.height(10.dp))
                     OutlinedButton(onClick = {
-                        val start = item.periods.lastOrNull()?.end?.plusMinutes(10) ?: LocalTime.of(8, 0)
-                        draft = item.copy(periods = item.periods + PeriodTime(start, start.plusMinutes(item.durationMinutes.toLong())))
+                        runCatching { PeriodUtils.appendPeriod(item.periods, item.durationMinutes) }
+                            .onSuccess { draft = item.copy(periods = it); error = null }
+                            .onFailure { error = it.message }
                     }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("添加节次") }
-                    if (editingCurrent) {
+                    if (presentedEditingCurrent) {
+                        Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = {
                             openEditor(item.copy(id = UUID.randomUUID().toString(), name = ""))
                         }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("另存为方案") }
@@ -242,7 +272,7 @@ fun PeriodTimeSchemesDialog(
             val controller = LocalDialogDismissController.current
             TextButton(onClick = {
                 if (draft != null) saveDraft() else controller?.dismiss() ?: onDismiss()
-            }, enabled = !busy) { Text(if (busy) "保存中…" else if (draft != null) "保存" else "关闭") }
+            }, enabled = !busy) { Text(if (busy) "保存中…" else if (presentedDraft != null) "保存" else "关闭") }
         },
         dismissButton = if (draft != null) {
             { TextButton(onClick = { returnToList() }, enabled = !busy) { Text("取消") } }
@@ -272,32 +302,33 @@ fun PeriodTimeSchemesDialog(
         )
     }
 
+    if (previewUniformDuration) draft?.let { item ->
+        val candidate = runCatching { PeriodUtils.withUniformDuration(item.periods, item.durationMinutes) }
+        val problem = candidate.exceptionOrNull()?.message ?: candidate.getOrNull()?.let { PeriodUtils.validatePeriods(it) }
+        AlertDialog(
+            onDismissRequest = { previewUniformDuration = false },
+            title = { Text("统一为 ${item.durationMinutes} 分钟") },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    candidate.getOrNull()?.let { PeriodChangesPreview(item.periods, it) }
+                    problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                draft = item.copy(periods = candidate.getOrThrow())
+                previewUniformDuration = false
+                error = null
+            }, enabled = problem == null) { Text("应用到草稿") } },
+            dismissButton = { TextButton(onClick = { previewUniformDuration = false }) { Text("取消") } }
+        )
+    }
+
     editingIndex?.let { index ->
         val item = draft ?: return@let
-        val initial = item.periods.getOrNull(index)?.start ?: return@let
-        val timeState = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
-        AlertDialog(
-            onDismissRequest = { editingIndex = null },
-            title = { Text("第 ${index + 1} 节开始时间") },
-            text = { TimePicker(state = timeState) },
-            confirmButton = {
-                val controller = LocalDialogDismissController.current
-                TextButton(onClick = {
-                    val action = {
-                        val start = LocalTime.of(timeState.hour, timeState.minute)
-                        draft = item.copy(periods = item.periods.toMutableList().also {
-                            it[index] = PeriodTime(start, start.plusMinutes(item.durationMinutes.toLong()))
-                        })
-                        editingIndex = null
-                        error = null
-                    }
-                    controller?.dismiss(action) ?: action()
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                val controller = LocalDialogDismissController.current
-                TextButton(onClick = { controller?.dismiss() ?: run { editingIndex = null } }) { Text("取消") }
-            }
+        if (index in item.periods.indices) PeriodTimeEditorDialog(
+            periods = item.periods, index = index,
+            onConfirm = { draft = item.copy(periods = it); error = null },
+            onDismiss = { editingIndex = null }
         )
     }
 }

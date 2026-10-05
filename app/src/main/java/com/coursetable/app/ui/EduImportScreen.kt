@@ -9,7 +9,6 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,7 +49,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.font.FontWeight
@@ -112,7 +110,7 @@ fun EduImportScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                SectionFrame {
+                SectionFrame(containerAlpha = 0.60f) {
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -134,7 +132,7 @@ fun EduImportScreen(
                     }
                 }
 
-                SectionFrame {
+                SectionFrame(containerAlpha = 0.60f) {
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -151,6 +149,8 @@ fun EduImportScreen(
                             value = customUrl,
                             onValueChange = { customUrl = it },
                             label = { Text("登录页 URL") },
+                            showUnfocusedBorder = false,
+                            containerAlpha = 0.55f,
                             placeholder = { Text("https://jwxt.xxx.edu.cn/jwglxt/xtgl/login_slogin.html") },
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
@@ -244,10 +244,9 @@ fun EduImportScreen(
                     .fillMaxWidth()
                     .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = {
+                FilledTonalButton(onClick = {
                     clearWebSession()
                     currentUrl = null
                     adapter = null
@@ -313,8 +312,7 @@ private fun SchoolButton(
         modifier = modifier.clip(shape),
         shape = shape,
         color = colors.primary.copy(alpha = 0.12f),
-        contentColor = colors.primary,
-        border = BorderStroke(1.dp, colors.primary.copy(alpha = 0.35f))
+        contentColor = colors.primary
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),

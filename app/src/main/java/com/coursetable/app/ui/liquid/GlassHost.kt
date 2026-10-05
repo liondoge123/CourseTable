@@ -145,7 +145,11 @@ private fun BoxScope.OverlaySceneStack(
 
     entries.getOrNull(level)?.let { entry ->
         key(entry.id) {
-            CompositionLocalProvider(LocalOverlayGlassBackdrop provides sceneBackdrop) {
+            CompositionLocalProvider(
+                LocalOverlayGlassBackdrop provides sceneBackdrop,
+                LocalOverlayBackActive provides (level == entries.lastIndex),
+                LocalBackInOverlay provides true
+            ) {
                 entry.content()
             }
         }
@@ -205,6 +209,7 @@ internal fun GlassOverlayPortal(
     destination: OverlayDestination = OverlayDestination.DIALOG,
     content: @Composable () -> Unit
 ) {
+    if (!LocalBackLayerActive.current) return
     val controller = LocalGlassOverlayController.current
     val currentContent = rememberUpdatedState(content)
     if (controller == null) {

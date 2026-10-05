@@ -9,6 +9,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PeriodTimeSchemeTest {
+    @Test fun defaultAlwaysExistsFirstAndUsesExistingTableTimes() {
+        val fallback = PeriodTimeScheme.defaultFor(7, summer.periods, 45)
+        assertEquals(listOf(fallback), PeriodTimeScheme.withDefault(emptyList(), fallback))
+        assertTrue(fallback.isDefault)
+        assertTrue(PeriodTimeScheme.isDefaultId(fallback.id))
+        assertEquals("默认方案", fallback.name)
+        val stored = fallback.copy(periods = winter.periods, durationMinutes = 50)
+        assertEquals(listOf(stored, summer), PeriodTimeScheme.withDefault(listOf(summer, stored), fallback))
+        assertEquals(listOf(stored), PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(stored))))
+        assertFalse(summer.isDefault)
+        assertFalse(PeriodTimeScheme.defaultFor(8).id == fallback.id)
+    }
     private val summer = PeriodTimeScheme(
         "summer", "夏季作息",
         listOf(

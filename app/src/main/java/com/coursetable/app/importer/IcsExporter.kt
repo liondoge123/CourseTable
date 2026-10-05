@@ -3,6 +3,7 @@ package com.coursetable.app.importer
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.WeekType
+import com.coursetable.app.data.scheduledWeeks
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -20,7 +21,15 @@ object IcsExporter {
         sb.append("VERSION:2.0\r\n")
         sb.append("PRODID:-//CourseTable//CN\r\n")
         for (course in courses) {
-            appendEvent(sb, settings, course)
+            if (course.selectedWeeksCsv.isBlank()) {
+                appendEvent(sb, settings, course)
+            } else {
+                // Separate dated events preserve gaps in every calendar importer.
+                course.scheduledWeeks().forEach { week ->
+                    appendEvent(sb, settings, course.copy(startWeek = week, endWeek = week,
+                        weekType = WeekType.ALL.code, selectedWeeksCsv = ""))
+                }
+            }
         }
         sb.append("END:VCALENDAR\r\n")
         return sb.toString()
@@ -28,7 +37,8 @@ object IcsExporter {
 
     private fun appendEvent(sb: StringBuilder, settings: AppSettings, course: Course) {
         val dayCode = DAY_CODE[course.dayOfWeek] ?: return
-        val firstDate = firstOccurrence(settings, course.startWeek, course.dayOfWeek) ?: return
+        val firstWeek = course.scheduledWeeks().firstOrNull() ?: return
+        val firstDate = firstOccurrence(settings, firstWeek, course.dayOfWeek) ?: return
         val startTime = settings.periods.getOrNull(course.startSection - 1)?.start ?: LocalTime.of(8, 0)
         val endIndex = (course.startSection - 1 + course.duration - 1).coerceIn(0, settings.periods.size - 1)
         val endTime = settings.periods.getOrNull(endIndex)?.end ?: startTime.plusMinutes(45)

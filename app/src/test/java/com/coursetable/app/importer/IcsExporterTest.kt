@@ -4,6 +4,8 @@ import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.WeekType
+import com.coursetable.app.data.scheduledWeeks
+import com.coursetable.app.data.withScheduledWeeks
 import java.time.LocalDate
 import java.time.LocalTime
 import org.junit.Assert.assertEquals
@@ -11,6 +13,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IcsExporterTest {
+
+    @Test fun irregularWeeksRoundTripWithoutExtraOccurrences() {
+        val course = Course(id = 3, name = "选修", dayOfWeek = 3, startSection = 1,
+            duration = 1, startWeek = 1, endWeek = 18).withScheduledWeeks(listOf(1, 4, 8))
+        val ics = IcsExporter.export(settings, listOf(course))
+        val parsed = IcsParser.parse(ics)
+        assertEquals(3, parsed.events.size)
+        val restored = IcsImporter.convert(parsed.events, settings).courses
+        assertEquals(listOf(1, 4, 8), restored.flatMap { it.scheduledWeeks() }.distinct().sorted())
+    }
 
     private val settings = AppSettings(
         semesterStart = LocalDate.of(2026, 9, 1),

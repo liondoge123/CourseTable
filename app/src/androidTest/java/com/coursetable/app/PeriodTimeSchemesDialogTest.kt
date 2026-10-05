@@ -38,7 +38,7 @@ class PeriodTimeSchemesDialogTest {
 
     private fun show(initial: List<PeriodTimeScheme> = listOf(winter), failSave: Boolean = false) {
         compose.setContent {
-            var schemes by remember { mutableStateOf(initial) }
+            var schemes by remember { mutableStateOf(PeriodTimeScheme.withDefault(initial, PeriodTimeScheme.defaultFor(0, current, 45))) }
             var times by remember { mutableStateOf(current) }
             CourseTableTheme {
                 LiquidBackdropHost(Modifier.fillMaxSize()) {
@@ -50,13 +50,41 @@ class PeriodTimeSchemesDialogTest {
                             schemes = schemes.filterNot { it.id == item.id } + item
                         },
                         onApply = { applied = it; times = it.periods },
-                        onSaveCurrent = { savedCurrent = it; times = it.periods },
+                        onSaveCurrent = { savedCurrent = it; times = it.periods; if (it.isDefault) schemes = schemes.filterNot { item -> item.id == it.id } + it },
                         onDelete = { id -> schemes = schemes.filterNot { it.id == id } },
                         onDismiss = {}
                     )
                 }
             }
         }
+    }
+
+    @Test fun listAndEditorKeepHorizontalAlignmentWithinOneGlassFrame() {
+        show()
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+
+        compose.onNodeWithText("冬季作息").performClick()
+        compose.mainClock.advanceTimeBy(90)
+        compose.onAllNodesWithTag("overlay-glass-dialog").assertCountEquals(1)
+        compose.onNodeWithText("编辑方案").assertExists()
+        val enteringTitle = compose.onNodeWithText("编辑方案").getUnclippedBoundsInRoot()
+
+        compose.mainClock.advanceTimeBy(250)
+        compose.onNodeWithText("节次时间").assertDoesNotExist()
+        compose.onNodeWithText("编辑方案").assertIsDisplayed()
+        val settledTitle = compose.onNodeWithText("编辑方案").getUnclippedBoundsInRoot()
+        assertEquals(enteringTitle.left, settledTitle.left)
+        assertEquals(enteringTitle.right, settledTitle.right)
+
+        compose.onNodeWithContentDescription("返回方案列表").performClick()
+        compose.mainClock.advanceTimeBy(90)
+        compose.onAllNodesWithTag("overlay-glass-dialog").assertCountEquals(1)
+        compose.onNodeWithText("节次时间").assertExists()
+        compose.mainClock.advanceTimeBy(250)
+        compose.onNodeWithText("编辑方案").assertDoesNotExist()
+        compose.onNodeWithText("节次时间").assertIsDisplayed()
+        compose.mainClock.autoAdvance = true
     }
 
     @Test fun editingSchemeDoesNotApplyIt() {
@@ -77,12 +105,12 @@ class PeriodTimeSchemesDialogTest {
         compose.onNodeWithText("选用").performClick()
         compose.onNodeWithText("已选用").assertIsDisplayed()
         compose.onNodeWithText("冬季作息").performClick()
-        compose.onNodeWithText("每节课时长").assertIsDisplayed()
+        compose.onNodeWithText("默认课时长").assertIsDisplayed()
         ParcelFileDescriptor.AutoCloseInputStream(
             InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("input keyevent 4")
         ).use { it.readBytes() }
         compose.onNodeWithText("已选用").assertIsDisplayed()
-        compose.onNodeWithText("每节课时长").assertDoesNotExist()
+        compose.onNodeWithText("默认课时长").assertDoesNotExist()
         compose.runOnIdle { assertEquals(winter, applied); assertNull(saved) }
     }
 
@@ -93,7 +121,7 @@ class PeriodTimeSchemesDialogTest {
         compose.onNodeWithText("保存").performClick()
         compose.onNodeWithText("保存失败，请重试").assertExists()
         compose.onNode(hasSetTextAction()).assertTextContains("未保存的修改")
-        compose.onNodeWithText("每节课时长").assertIsDisplayed()
+        compose.onNodeWithText("默认课时长").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
         compose.onNodeWithText("冬季作息").assertIsDisplayed()
         compose.runOnIdle { assertNull(saved); assertNull(applied) }
@@ -101,12 +129,12 @@ class PeriodTimeSchemesDialogTest {
 
     @Test fun newSchemeCopiesCurrentTimesWithoutApplyingOrLosingIndividualEnds() {
         show(initial = emptyList())
-        compose.onNodeWithText("暂无方案").assertIsDisplayed()
+        compose.onNodeWithText("默认方案").assertIsDisplayed()
         compose.onNodeWithText("新建方案").performClick()
         compose.onNode(hasSetTextAction()).performTextReplacement("夏季作息")
         compose.onNodeWithText("保存").performClick()
         compose.onNodeWithText("夏季作息").assertIsDisplayed()
-        compose.onNodeWithText("已选用").assertIsDisplayed()
+        compose.onAllNodesWithText("已选用").assertCountEquals(2)
         compose.runOnIdle {
             assertEquals(current, saved?.periods)
             assertNotNull(saved)
@@ -116,7 +144,7 @@ class PeriodTimeSchemesDialogTest {
 
     @Test fun customTimeSaveUsesCurrentTableCallback() {
         show()
-        compose.onNodeWithText("当前自定义").performClick()
+        compose.onNodeWithText("默认方案").performClick()
         compose.onNodeWithText("保存").performClick()
         compose.onNodeWithText("新建方案").assertIsDisplayed()
         compose.runOnIdle {
@@ -128,7 +156,7 @@ class PeriodTimeSchemesDialogTest {
 
     @Test fun customTimeCanBeSavedAsSchemeAndDeletedWithConfirmation() {
         show(initial = emptyList())
-        compose.onNodeWithText("当前自定义").performClick()
+        compose.onNodeWithText("默认方案").performClick()
         compose.onNodeWithText("另存为方案").performScrollTo().performClick()
         compose.onNode(hasSetTextAction()).performTextReplacement("自建方案")
         compose.onNodeWithText("保存").performClick()
@@ -138,8 +166,8 @@ class PeriodTimeSchemesDialogTest {
         compose.onNodeWithText("自建方案").assertIsDisplayed()
         compose.onNodeWithContentDescription("删除自建方案").performClick()
         compose.onNodeWithText("删除", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("暂无方案").assertIsDisplayed()
-        compose.onNodeWithText("当前自定义").assertIsDisplayed()
+        compose.onNodeWithText("默认方案").assertIsDisplayed()
+        compose.onNodeWithContentDescription("删除默认方案").assertDoesNotExist()
         compose.runOnIdle { assertNull(applied); assertNull(savedCurrent) }
     }
 
@@ -149,13 +177,52 @@ class PeriodTimeSchemesDialogTest {
         compose.onNodeWithContentDescription("加 5 分钟").performClick()
         compose.onNodeWithText("添加节次").performScrollTo().performClick()
         compose.onNodeWithContentDescription("删除第 1 节").performScrollTo().performClick()
-        compose.onNodeWithContentDescription("编辑第 1 节").performClick()
-        compose.onNodeWithText("第 1 节开始时间").assertIsDisplayed()
+        compose.onNodeWithTag("period-row-1").performClick()
+        compose.onNodeWithText("第 1 节课").assertIsDisplayed()
         compose.onNodeWithText("确定").performClick()
         compose.onNodeWithText("保存").performClick()
         compose.runOnIdle {
             assertEquals(50, saved?.durationMinutes)
-            assertEquals(listOf(PeriodTime(LocalTime.of(9, 30), LocalTime.of(10, 20))), saved?.periods)
+            assertEquals(listOf(PeriodTime(LocalTime.of(9, 25), LocalTime.of(10, 15))), saved?.periods)
+            assertNull(applied)
+        }
+    }
+
+    @Test fun changingDefaultPreservesExistingCustomEnds() {
+        show(initial = emptyList())
+        compose.onNodeWithText("默认方案").performClick()
+        compose.onNodeWithContentDescription("加 5 分钟").performClick()
+        compose.onNodeWithText("保存").performClick()
+        compose.runOnIdle {
+            assertEquals(50, savedCurrent?.durationMinutes)
+            assertEquals(current, savedCurrent?.periods)
+        }
+    }
+
+    @Test fun emptyCustomListHasSelectedDefaultWithoutDeleteOrRename() {
+        show(initial = emptyList())
+        compose.onNodeWithText("默认方案").assertIsDisplayed()
+        compose.onNodeWithText("已选用").assertIsDisplayed()
+        compose.onNodeWithContentDescription("删除默认方案").assertDoesNotExist()
+        compose.onNodeWithText("暂无方案").assertDoesNotExist()
+        compose.onNodeWithText("默认方案").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithText("默认方案").assertIsDisplayed()
+    }
+
+    @Test fun bulkDurationPreviewRequiresExplicitApplyAndDoesNotSelectScheme() {
+        show()
+        compose.onNodeWithText("冬季作息").performClick()
+        compose.onNodeWithContentDescription("加 5 分钟").performClick()
+        compose.onNodeWithText("统一已有节次课时长…").performClick()
+        compose.onNodeWithText("调整预览").assertExists()
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithText("统一已有节次课时长…").performClick()
+        compose.onNodeWithText("应用到草稿").performClick()
+        compose.onNodeWithText("保存").performClick()
+        compose.runOnIdle {
+            assertEquals(LocalTime.of(9, 20), saved?.periods?.single()?.end)
             assertNull(applied)
         }
     }

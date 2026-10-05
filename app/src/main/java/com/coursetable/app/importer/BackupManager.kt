@@ -24,7 +24,7 @@ data class BackupData(
 
 object BackupManager {
 
-    const val FORMAT_VERSION = 2
+    const val FORMAT_VERSION = 3
 
     fun export(timetables: List<TimetableBackup>): String {
         val root = JSONObject()
@@ -53,6 +53,7 @@ object BackupManager {
                 o.put("startWeek", c.startWeek)
                 o.put("endWeek", c.endWeek)
                 o.put("weekType", c.weekType)
+                o.put("selectedWeeksCsv", c.selectedWeeksCsv)
                 o.put("color", c.color)
                 arr.put(o)
             }
@@ -151,7 +152,8 @@ object BackupManager {
                     startWeek = startWeek,
                     endWeek = endWeek,
                     weekType = o.optInt("weekType", 0).coerceIn(0, 2),
-                    color = o.optLong("color", 0xFF4B6EAF)
+                    color = o.optLong("color", 0xFF4B6EAF),
+                    selectedWeeksCsv = com.coursetable.app.data.parseSelectedWeeks(o.optString("selectedWeeksCsv").take(240)).joinToString(",")
                 )
             )
         }

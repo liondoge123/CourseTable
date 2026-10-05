@@ -1,5 +1,7 @@
 package com.coursetable.app.ui
 
+import com.coursetable.app.data.weeksLabel
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -112,14 +114,14 @@ fun CourseManageScreen(
                         )
                     }
                     item(key = "group-$day") {
-                        SectionFrame {
-                            Column(Modifier.padding(horizontal = 4.dp)) {
-                                dayCourses.forEach { course ->
+                        SectionFrame(outlined = false) {
+                            Column {
+                                dayCourses.forEachIndexed { index, course ->
                             Row(
                                 Modifier
                                     .fillMaxWidth()
                                     .clickable { editingCourse = course }
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
@@ -151,7 +153,9 @@ fun CourseManageScreen(
                                     compact = true
                                 )
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            if (index != dayCourses.lastIndex) {
+                                HorizontalDivider(Modifier.padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            }
                                 }
                             }
                         }
@@ -177,13 +181,8 @@ fun CourseManageScreen(
 
 private fun courseSummary2(course: Course): String {
     val day = WEEKDAY_SHORT2.getOrNull(course.dayOfWeek - 1) ?: ""
-    val type = when (course.weekType) {
-        1 -> "单周"
-        2 -> "双周"
-        else -> ""
-    }
     val sec = "第${course.startSection}-${course.startSection + course.duration - 1}节"
-    val weeks = "第${course.startWeek}-${course.endWeek}周$type"
+    val weeks = course.weeksLabel()
     val loc = if (course.location.isNotBlank()) " · ${course.location}" else ""
     val teacher = if (course.teacher.isNotBlank()) " · ${course.teacher}" else ""
     return "$day $sec $weeks$loc$teacher"

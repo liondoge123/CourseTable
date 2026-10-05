@@ -50,11 +50,14 @@ data class Course(
     /** 对应 [WeekType.code] */
     val weekType: Int = WeekType.ALL.code,
     /** ARGB 颜色（Long） */
-    val color: Long = 0xFF4B6EAF
+    val color: Long = 0xFF4B6EAF,
+    /** Explicit non-contiguous weeks; blank uses startWeek/endWeek/weekType. */
+    @androidx.room.ColumnInfo(defaultValue = "''") val selectedWeeksCsv: String = ""
 ) {
     fun weekTypeEnum(): WeekType = WeekType.from(weekType)
 
     fun visibleOnWeek(week: Int): Boolean {
+        if (selectedWeeksCsv.isNotBlank()) return week in scheduledWeeks()
         if (week < startWeek || week > endWeek) return false
         return when (weekTypeEnum()) {
             WeekType.ALL -> true
@@ -65,6 +68,7 @@ data class Course(
 
     /** 最后一次实际上课的周（单双周按实际节次回退） */
     fun lastWeek(): Int {
+        if (selectedWeeksCsv.isNotBlank()) return scheduledWeeks().lastOrNull() ?: startWeek
         val last = when (weekTypeEnum()) {
             WeekType.ODD -> if (endWeek % 2 == 1) endWeek else endWeek - 1
             WeekType.EVEN -> if (endWeek % 2 == 0) endWeek else endWeek - 1
@@ -117,7 +121,7 @@ interface CourseDao {
     suspend fun deleteTimetable(id: Long)
 }
 
-@Database(entities = [Course::class, Timetable::class], version = 2, exportSchema = true)
+@Database(entities = [Course::class, Timetable::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun courseDao(): CourseDao
     abstract fun timetableDao(): TimetableDao
@@ -125,6 +129,12 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `courses` ADD COLUMN `selectedWeeksCsv` TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         /** v1 → v2：新增 timetables 表，courses 增加 timetableId 列 */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -150,7 +160,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "coursetable.db"
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
             }
     }
 }

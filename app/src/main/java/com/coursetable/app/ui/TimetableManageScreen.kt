@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.data.Timetable
@@ -45,7 +46,7 @@ fun TimetableManageScreen(
     var renameTarget by remember { mutableStateOf<Timetable?>(null) }
     var timetableToDelete by remember { mutableStateOf<Timetable?>(null) }
 
-    FullscreenPageContainer {
+    FullscreenPageContainer(Modifier.testTag("timetable-manage-page")) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -65,7 +66,7 @@ fun TimetableManageScreen(
 
         SectionFrame {
             LazyColumn {
-                items(timetables, key = { it.id }) { table ->
+                itemsIndexed(timetables, key = { _, table -> table.id }) { index, table ->
                     val isActive = table.id == activeId
                     Row(
                         Modifier
@@ -124,7 +125,9 @@ fun TimetableManageScreen(
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    if (index != timetables.lastIndex) {
+                        HorizontalDivider(Modifier.padding(start = 46.dp, end = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
             }
         }
@@ -217,6 +220,8 @@ private fun NameDialog(
                 onValueChange = { name = it },
                 singleLine = true,
                 label = { Text("课表名称") },
+                showUnfocusedBorder = false,
+                containerAlpha = 0.55f,
                 modifier = Modifier.fillMaxWidth()
             )
         },

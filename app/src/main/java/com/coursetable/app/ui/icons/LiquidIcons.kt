@@ -368,6 +368,19 @@ private val viewWeekIcon = lucideIcon(
     "M15 3v18",
 )
 
+private val codeIcon = lucideIcon(
+    "code",
+    "m16 18 6-6-6-6",
+    "m8 6-6 6 6 6",
+)
+
+private val externalLinkIcon = lucideIcon(
+    "external-link",
+    "M15 3h6v6",
+    "M10 14 21 3",
+    "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+)
+
 object Icons {
     object Filled {
         val Add = plusIcon; val Remove = minusIcon; val Close = closeIcon; val Check = checkIcon
@@ -383,6 +396,7 @@ object Icons {
         val Visibility = visibilityIcon; val Info = infoIcon
         val FilterList = filterListIcon; val RadioButtonUnchecked = radioIcon; val CheckCircle = checkCircleIcon
         val BookOpen = bookIcon; val MoreHorizontal = moreIcon
+        val Code = codeIcon; val ExternalLink = externalLinkIcon
     }
     object AutoMirrored {
         object Filled {

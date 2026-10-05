@@ -2,12 +2,10 @@ package com.coursetable.app.ui
 
 import android.net.Uri
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -168,8 +167,9 @@ fun ImportScreen(
     }
     val settings by settingsState.collectAsState()
 
-    LaunchedEffect(flowState.completed.value) {
-        if (flowState.completed.value) { flowState.completed.value = false; onImported() }
+    val importPageActive = LocalBackLayerActive.current
+    LaunchedEffect(flowState.completed.value, importPageActive) {
+        if (importPageActive && flowState.completed.value) { flowState.completed.value = false; onImported() }
     }
     var busy by flowState.busy
     var pendingPreview by flowState.pendingPreview
@@ -188,8 +188,8 @@ fun ImportScreen(
     var entryHandled by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(false) }
 
     val imagePreviewOpen = pendingPreview != null && pendingPreview !is ImportPreview.Backup
-    LaunchedEffect(showEduImport, imagePreviewOpen) {
-        onSubpageChanged(showEduImport || imagePreviewOpen)
+    LaunchedEffect(showEduImport, imagePreviewOpen, importPageActive) {
+        if (importPageActive) onSubpageChanged(showEduImport || imagePreviewOpen)
     }
 
     fun toast(msg: String) {
@@ -308,8 +308,8 @@ fun ImportScreen(
         finally { busy = false; autoRecognizing = false }
     }
 
-    LaunchedEffect(preparedImage, autoRecognizing) {
-        if (autoRecognizing) preparedImage?.let { recognizePrepared(it) }
+    LaunchedEffect(preparedImage, autoRecognizing, importPageActive) {
+        if (importPageActive && autoRecognizing) preparedImage?.let { recognizePrepared(it) }
     }
 
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -317,8 +317,8 @@ fun ImportScreen(
         scope.launch { handleUri(uri, null) }
     }
 
-    LaunchedEffect(initialEntry) {
-        if (!entryHandled) {
+    LaunchedEffect(initialEntry, importPageActive) {
+        if (importPageActive && !entryHandled) {
             entryHandled = true
             when (initialEntry) {
                 ImportEntry.EDU -> showEduImport = true
@@ -328,7 +328,8 @@ fun ImportScreen(
         }
     }
 
-    LaunchedEffect(incoming) {
+    LaunchedEffect(incoming, importPageActive) {
+        if (!importPageActive) return@LaunchedEffect
         val inc = incoming ?: return@LaunchedEffect
         handleUri(inc.uri, inc.mimeType)
         onConsumed()
@@ -337,16 +338,15 @@ fun ImportScreen(
         }
     }
 
-    if (!imagePreviewOpen) AnimatedContent(
+    CompositionLocalProvider(LocalBackLayerActive provides (LocalBackLayerActive.current && !imagePreviewOpen)) {
+    PredictivePageTransition(
         targetState = showEduImport,
-        transitionSpec = fullscreenSubpageTransitionSpec(),
-        label = "ImportToEduImport"
+        onBack = {
+            if (initialEntry == ImportEntry.EDU && onBack != null) onBack()
+            else showEduImport = false
+        }
     ) { isEdu ->
         if (isEdu) {
-            BackHandler {
-                if (initialEntry == ImportEntry.EDU && onBack != null) onBack()
-                else showEduImport = false
-            }
             EduImportScreen(
                 semesterStart = settings.semesterStart,
                 onDone = { result, sourceLabel ->
@@ -449,6 +449,9 @@ fun ImportScreen(
         )
     }
 
+    } // Retain the import hub below the review page.
+
+    if (importPageActive) {
     pendingPreview?.let { preview ->
         val confirmImport: () -> Unit = {
                 scope.launch {
@@ -516,6 +519,7 @@ fun ImportScreen(
         )
     }
 
+    }
 }
 
 @Composable
@@ -534,7 +538,6 @@ private fun ImportCard(
             .clickable(enabled = enabled, onClick = onClick),
         shape = shape,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
@@ -601,6 +604,7 @@ internal fun candidateToCourse(c: CandidateCourse, timetableId: Long = 0): Cours
         startWeek = c.startWeek,
         endWeek = c.endWeek,
         weekType = c.weekType,
+        selectedWeeksCsv = c.selectedWeeksCsv,
         color = CourseColorPalette[
             (c.name.hashCode() and Int.MAX_VALUE) % CourseColorPalette.size
         ].toArgbLong()
@@ -618,6 +622,7 @@ internal fun courseToCandidate(c: Course): CandidateCourse {
         duration = c.duration,
         startWeek = c.startWeek,
         endWeek = c.endWeek,
-        weekType = c.weekType
+        weekType = c.weekType,
+        selectedWeeksCsv = c.selectedWeeksCsv
     )
 }

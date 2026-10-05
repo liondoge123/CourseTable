@@ -1,6 +1,5 @@
 package com.coursetable.app.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -21,8 +19,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,7 +29,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,10 +38,13 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.coursetable.app.data.Course
-import com.coursetable.app.data.WeekType
+import com.coursetable.app.data.scheduledWeeks
+import com.coursetable.app.data.withScheduledWeeks
+import com.coursetable.app.data.weeksLabel
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.CourseColorPalette
@@ -80,29 +78,27 @@ fun CourseEditorDialog(
     var day by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.dayOfWeek.coerceIn(1, 7)) }
     var startSection by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.startSection.coerceIn(1, periodCount)) }
     var duration by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.duration.coerceIn(1, (periodCount - course.startSection.coerceIn(1, periodCount) + 1).coerceAtLeast(1))) }
-    var weekType by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(WeekType.from(course.weekType)) }
-    var startWeek by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.startWeek.coerceIn(1, totalWeeks)) }
-    var endWeek by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.endWeek.coerceIn(startWeek, totalWeeks)) }
+    var selectedWeeks by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(course.scheduledWeeks().filter { it in 1..totalWeeks })
+    }
+    var showTimePicker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var showWeeksPicker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val schedule = if (selectedWeeks.isNotEmpty()) course.withScheduledWeeks(selectedWeeks) else course
     var color by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.color) }
     var saving by remember { mutableStateOf(false) }
 
-    val maxDuration = (periodCount - startSection + 1).coerceAtLeast(1)
-
     fun save() {
         val trimmed = name.trim()
-        if (trimmed.isEmpty() || saving) return
+        if (trimmed.isEmpty() || selectedWeeks.isEmpty() || saving) return
         saving = true
         onSave(
-            course.copy(
+            schedule.copy(
                 name = trimmed,
                 teacher = teacher.trim(),
                 location = location.trim(),
                 dayOfWeek = day,
                 startSection = startSection,
                 duration = duration,
-                weekType = weekType.code,
-                startWeek = startWeek,
-                endWeek = endWeek,
                 color = color
             )
         )
@@ -111,23 +107,31 @@ fun CourseEditorDialog(
     var discardChanges by remember { mutableStateOf(false) }
     val changed = name != course.name || teacher != course.teacher || location != course.location ||
         day != course.dayOfWeek || startSection != course.startSection || duration != course.duration ||
-        startWeek != course.startWeek || endWeek != course.endWeek || weekType.code != course.weekType || color != course.color
+        selectedWeeks != course.scheduledWeeks().filter { it in 1..totalWeeks } || color != course.color
     fun requestDismiss() { if (!saving) { if (protectEdits && changed) discardChanges = true else onDismiss() } }
-    androidx.activity.compose.BackHandler(embedded) { requestDismiss() }
+    val editorBack = rememberPredictiveBack(
+        enabled = embedded && !discardChanges && !showWeeksPicker && !showTimePicker,
+        canCommit = { !saving && !(protectEdits && changed) },
+        onRejected = { requestDismiss() },
+        onBack = { requestDismiss() }
+    )
     if (discardChanges) AlertDialog(dismissButtonRole = DialogActionRole.Destructive, onDismissRequest = { discardChanges = false }, title = { Text("保存校对修改？") },
         text = { Text("当前课程有尚未保存的修改。") },
         confirmButton = { TextButton(onClick = { discardChanges = false; save() }, enabled = name.isNotBlank()) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("放弃修改") } })
-    val editorContent: @Composable () -> Unit = {
+    val editorContent: @Composable () -> Unit = { EndInputOnOutsideTap { endInputModifier ->
         Column(
             Modifier
+                .then(endInputModifier)
                 .fillMaxWidth()
                 .testTag("course-editor-page")
+                .then(if (embedded) Modifier.predictiveBackTransform(editorBack, BackPresentation.DIALOG) else Modifier)
                 .fillMaxHeight(if (embedded) 1f else 0.94f)
                 .navigationBarsPadding()
+                // Reduce the editor's inner viewport without changing the sheet height.
                 .imePadding()
         ) {
-            val canSave = name.isNotBlank() && !saving
+            val canSave = name.isNotBlank() && selectedWeeks.isNotEmpty() && !saving
 
             // 单行一体化顶部操作栏（左侧✕、中间居中标题、右侧对称✓）
             Box(
@@ -207,9 +211,7 @@ fun CourseEditorDialog(
                     day = day,
                     startSection = startSection,
                     duration = duration,
-                    weekType = weekType,
-                    startWeek = startWeek,
-                    endWeek = endWeek
+                    weeksLabel = if (selectedWeeks.isEmpty()) "未选择周次" else schedule.weeksLabel()
                 )
 
                 // 模块 1: 基本信息
@@ -219,26 +221,32 @@ fun CourseEditorDialog(
                         value = name,
                         onValueChange = { name = it },
                         label = { Text("课程名称 *") },
+                        showUnfocusedBorder = false,
+                        containerAlpha = 0.55f,
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().testTag("course-editor-name")
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = teacher,
                             onValueChange = { teacher = it },
                             label = { Text("任课教师") },
+                            showUnfocusedBorder = false,
+                            containerAlpha = 0.55f,
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).testTag("course-editor-teacher")
                         )
                         OutlinedTextField(
                             value = location,
                             onValueChange = { location = it },
                             label = { Text("上课地点") },
+                            showUnfocusedBorder = false,
+                            containerAlpha = 0.55f,
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).testTag("course-editor-location")
                         )
                     }
                 }
@@ -246,81 +254,52 @@ fun CourseEditorDialog(
                 // 模块 2: 上课时间
                 EditorSectionCard(icon = "⏰", title = "上课时间") {
                     reviewHints.filter { "星期" in it || "节次" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    Text(
-                        text = "星期",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth().testTag("course-editor-time"),
+                        shape = LiquidButtonShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f)
                     ) {
-                        WeekdayLabels.forEachIndexed { index, label ->
-                            OptionChip(
-                                selected = day == index + 1,
-                                onClick = { day = index + 1 },
-                                label = "周$label",
-                                modifier = Modifier.size(42.dp, 38.dp)
-                            )
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("周${WeekdayLabels[day - 1]} · 第 $startSection–${startSection + duration - 1} 节",
+                                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text("共 $duration 节",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "选择课程时间",
+                                modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        NumberPickerField(
-                            label = "开始节次",
-                            value = startSection,
-                            range = 1..periodCount,
-                            formatter = { "第 $it 节" }
-                        ) { newSec ->
-                            startSection = newSec
-                            duration = duration.coerceIn(1, (periodCount - newSec + 1).coerceAtLeast(1))
-                        }
-                        NumberPickerField(
-                            label = "节数时长",
-                            value = duration.coerceIn(1, maxDuration),
-                            range = 1..maxDuration,
-                            formatter = { "共 $it 节" }
-                        ) { duration = it }
                     }
                 }
 
-                // 模块 3: 周次范围
-                EditorSectionCard(icon = "📅", title = "周次范围") {
+                // 模块 3: 上课周次
+                EditorSectionCard(icon = "📅", title = "上课周次") {
                     reviewHints.filter { "周次" in it || "单双周" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    Text(
-                        text = "单双周规则",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        onClick = { showWeeksPicker = true },
+                        modifier = Modifier.fillMaxWidth().testTag("course-editor-weeks"),
+                        shape = LiquidButtonShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f)
                     ) {
-                        WeekType.entries.forEach { type ->
-                            OptionChip(
-                                selected = weekType == type,
-                                onClick = { weekType = type },
-                                label = type.label,
-                                modifier = Modifier.size(68.dp, 38.dp)
-                            )
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (selectedWeeks.isEmpty()) "选择上课周次" else schedule.weeksLabel(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    fontWeight = FontWeight.SemiBold)
+                                Text("已选 ${selectedWeeks.size} 周",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "选择上课周次",
+                                modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        NumberPickerField(
-                            label = "开始周",
-                            value = startWeek,
-                            range = 1..totalWeeks,
-                            formatter = { "第 $it 周" }
-                        ) { value ->
-                            startWeek = value
-                            endWeek = endWeek.coerceIn(value, totalWeeks)
-                        }
-                        NumberPickerField(
-                            label = "结束周",
-                            value = endWeek,
-                            range = startWeek..totalWeeks,
-                            formatter = { "第 $it 周" }
-                        ) { endWeek = it }
                     }
                 }
 
@@ -345,7 +324,7 @@ fun CourseEditorDialog(
                                     .border(
                                         2.dp,
                                         if (selected) MaterialTheme.colorScheme.onSurface
-                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        else Color.Transparent,
                                         CircleShape
                                     )
                                     .clickable { color = paletteColorLong },
@@ -377,15 +356,31 @@ fun CourseEditorDialog(
                 Button(onClick = ::save, enabled = canSave, modifier = Modifier.weight(1f)) { Text(saveLabel) }
             }
         }
-    }
+    } }
+    if (showTimePicker) CourseTimeDialog(
+        initialDay = day,
+        initialStart = startSection,
+        initialEnd = startSection + duration - 1,
+        periodCount = periodCount,
+        onConfirm = { newDay, newStart, newEnd ->
+            day = newDay
+            startSection = newStart
+            duration = newEnd - newStart + 1
+        },
+        onDismiss = { showTimePicker = false }
+    )
+    if (showWeeksPicker) CourseWeeksDialog(
+        totalWeeks = totalWeeks,
+        initialWeeks = selectedWeeks,
+        onConfirm = { selectedWeeks = it },
+        onDismiss = { showWeeksPicker = false }
+    )
     if (embedded) editorContent() else {
-        val density = LocalDensity.current
-        val imeVisible = WindowInsets.ime.getBottom(density) > 0
         ModalBottomSheet(
             onDismissRequest = { requestDismiss() },
             canDismiss = { if (protectEdits && changed) { requestDismiss(); false } else !saving },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            shape = RoundedCornerShape(if (imeVisible) 0.dp else 32.dp)
+            shape = RoundedCornerShape(32.dp)
         ) { editorContent() }
     }
 }
@@ -429,9 +424,7 @@ private fun CourseCardPreview(
     day: Int,
     startSection: Int,
     duration: Int,
-    weekType: WeekType,
-    startWeek: Int,
-    endWeek: Int,
+    weeksLabel: String,
     modifier: Modifier = Modifier
 ) {
     val accent = Color.fromStoredLong(colorLong)
@@ -442,8 +435,8 @@ private fun CourseCardPreview(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.20f),
+        border = null
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -461,10 +454,14 @@ private fun CourseCardPreview(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "周$dayLabel · 第${startSection}-${startSection + duration - 1}节 · ${weekType.label} · ${startWeek}-${endWeek}周",
+                    text = "周$dayLabel · 第${startSection}-${startSection + duration - 1}节 · $weeksLabel",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.End,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -473,7 +470,7 @@ private fun CourseCardPreview(
                     .fillMaxWidth()
                     .height(76.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(cardBg)
+                    .background(cardBg.copy(alpha = 0.55f))
                     .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -521,68 +518,5 @@ private fun CourseCardPreview(
                 }
             }
         }
-    }
-}
-
-/**
- * 触发数字滚轮选择器的紧凑字段控件
- */
-@Composable
-private fun androidx.compose.foundation.layout.RowScope.NumberPickerField(
-    label: String,
-    value: Int,
-    range: IntRange,
-    formatter: (Int) -> String = { it.toString() },
-    onValue: (Int) -> Unit
-) {
-    var showPicker by remember { mutableStateOf(false) }
-    Box(Modifier.weight(1f)) {
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Surface(
-                onClick = { showPicker = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Row(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = formatter(value),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "选择",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
-            }
-        }
-    }
-    if (showPicker) {
-        NumberWheelPickerDialog(
-            title = "选择$label",
-            range = range,
-            initialValue = value,
-            formatter = formatter,
-            onConfirm = onValue,
-            onDismiss = { showPicker = false }
-        )
     }
 }

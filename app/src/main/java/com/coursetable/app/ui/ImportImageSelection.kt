@@ -157,7 +157,7 @@ fun ImportImageSelection(image: PreparedImportImage, selection: ImageSelection, 
                     Text("拖动边角调整范围，拖动框内移动选区；双指缩放和移动图片", style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.onSurfaceVariant)
                     error?.let { Text(it, style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.error) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = { onSelection(ImageSelection()); resetKey++ }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("重置") }
+                        FilledTonalButton(onClick = { onSelection(ImageSelection()); resetKey++ }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("重置") }
                         Button(onClick = onConfirm, enabled = !busy && bitmap != null, modifier = Modifier.weight(2f)) { Text(if (busy) "正在识别…" else "确认并识别") }
                     }
                 }

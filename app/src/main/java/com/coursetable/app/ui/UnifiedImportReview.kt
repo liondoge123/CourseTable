@@ -1,6 +1,7 @@
 package com.coursetable.app.ui
 
-import androidx.activity.compose.BackHandler
+import com.coursetable.app.data.weeksLabel
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -72,8 +73,7 @@ private fun ReviewCourseCard(
     val section = if (course.startSection >= 1 && course.duration > 0 && course.startSection.toLong() + course.duration - 1 <= settings.periods.size) {
         "第 ${course.startSection}—${course.startSection + course.duration - 1} 节"
     } else "节次待确认"
-    val weekRule = when (course.weekType) { 1 -> " · 单周"; 2 -> " · 双周"; else -> "" }
-    SectionFrame(Modifier.testTag("review-course-${course.draftId.orEmpty()}")) {
+    SectionFrame(Modifier.testTag("review-course-${course.draftId.orEmpty()}"), containerAlpha = 0.60f) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -94,7 +94,7 @@ private fun ReviewCourseCard(
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(course.name.ifBlank { "课程名称待补齐" }, style = LiquidTheme.typography.titleSmall)
-                    Text("$weekday · $section · ${course.startWeek}—${course.endWeek} 周$weekRule", style = LiquidTheme.typography.bodySmall)
+                    Text("$weekday · $section · ${candidateToCourse(course).weeksLabel()}", style = LiquidTheme.typography.bodySmall)
                     listOf(course.teacher, course.location).filter { it.isNotBlank() }.joinToString(" · ").takeIf { it.isNotBlank() }
                         ?.let { Text(it, style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.onSurfaceVariant) }
                     fieldErrors.takeIf { it.isNotEmpty() }?.let {
@@ -178,12 +178,17 @@ internal fun UnifiedImportReview(
                     if(session != null) ImportCourseSource(session, c, settings, compact = true) else Text("来源：$sourceLabel", style = LiquidTheme.typography.bodySmall)
                 }
             }), onDismiss = { addingId = null; selected = null }, onSave = { saved ->
-                val next = c.copy(name = saved.name, teacher = saved.teacher, location = saved.location, dayOfWeek = saved.dayOfWeek, startSection = saved.startSection, duration = saved.duration, startWeek = saved.startWeek, endWeek = saved.endWeek, weekType = saved.weekType, needsReview = false)
+                val next = c.copy(name = saved.name, teacher = saved.teacher, location = saved.location, dayOfWeek = saved.dayOfWeek, startSection = saved.startSection, duration = saved.duration, startWeek = saved.startWeek, endWeek = saved.endWeek, weekType = saved.weekType, selectedWeeksCsv = saved.selectedWeeksCsv, needsReview = false)
                 if(adding != null) { onCandidates(candidates + next); addingId = null } else update(c, next)
             }, onDelete = if (adding != null) null else ({ update(c, null) }))
     } } }
-    BackHandler(selected == null && adding == null && !original && !more && !confirm && !leave && !reselect) { dismiss() }
-    FullscreenPageContainer(Modifier.testTag("import-review-page")) {
+    val reviewBack = rememberPredictiveBack(
+        enabled = selected == null && adding == null && !original && !more && !confirm && !leave && !reselect,
+        canCommit = { !saving && !hasEdits },
+        onRejected = { dismiss() },
+        onBack = { dismiss() }
+    )
+    FullscreenPageContainer(Modifier.testTag("import-review-page").predictiveBackTransform(reviewBack, BackPresentation.PAGE)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp
         Row(Modifier.fillMaxSize()) {
@@ -259,7 +264,7 @@ internal fun UnifiedImportReview(
                         if (suggestions > 0) add(2 to "建议确认 $suggestions")
                     }
                     filters.forEach { (id, label) ->
-                        OptionChip(activeFilter == id, { filter = id }, label, large = true)
+                        OptionChip(activeFilter == id, { filter = id }, label, large = true, outlined = false)
                     }
                 }
                 if (errors + suggestions > 0) TextButton(onClick = ::startQueue, enabled = !saving && editing == null) { Text("开始校对") }
@@ -285,14 +290,14 @@ internal fun UnifiedImportReview(
                     }
                 }
                 if (warnings.isNotEmpty()) item("warnings") {
-                    SectionFrame { Text(warnings.joinToString("\n"), Modifier.padding(12.dp), style = LiquidTheme.typography.bodySmall) }
+                    SectionFrame(containerAlpha = 0.60f) { Text(warnings.joinToString("\n"), Modifier.padding(12.dp), style = LiquidTheme.typography.bodySmall) }
                 }
             }
             deleted?.let { (index, c) -> Row(Modifier.padding(horizontal = 16.dp)) {
                 Text("已删除 ${c.name}", Modifier.weight(1f))
                 TextButton(onClick = { onCandidates(candidates.toMutableList().apply { add(index.coerceAtMost(size), c) }); deleted = null }, enabled = !saving && editing == null) { Text("撤销") }
             } }
-            SectionFrame(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).testTag("review-import-bar")) {
+            SectionFrame(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).testTag("review-import-bar"), containerAlpha = 0.60f) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val compactBar = this.maxWidth < 400.dp
                 Row(
@@ -325,7 +330,7 @@ internal fun UnifiedImportReview(
                 }
             }
         }
-        if (wide && editing != null) SectionFrame(Modifier.width(380.dp).fillMaxHeight().padding(12.dp)) { editor(true) }
+        if (wide && editing != null) SectionFrame(Modifier.width(380.dp).fillMaxHeight().padding(12.dp), containerAlpha = 0.20f) { editor(true) }
         }
         if (!wide && editing != null) editor(false)
         }

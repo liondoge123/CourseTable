@@ -9,12 +9,27 @@ data class PeriodTimeScheme(
     val id: String,
     val name: String,
     val periods: List<PeriodTime>,
+    /** Default for new periods; existing periods may have individual durations. */
     val durationMinutes: Int
 ) {
+    val isDefault: Boolean get() = isDefaultId(id)
     fun matches(periods: List<PeriodTime>, durationMinutes: Int): Boolean =
         this.periods == periods && this.durationMinutes == durationMinutes
 
     companion object {
+        private const val DEFAULT_ID_PREFIX = "builtin-default:"
+        const val DEFAULT_NAME = "默认方案"
+
+        fun defaultId(timetableId: Long): String = "$DEFAULT_ID_PREFIX$timetableId"
+        fun isDefaultId(id: String): Boolean = id.startsWith(DEFAULT_ID_PREFIX)
+
+        fun defaultFor(timetableId: Long, periods: List<PeriodTime> = AppSettings.defaultPeriods(), durationMinutes: Int = 45) =
+            PeriodTimeScheme(defaultId(timetableId), DEFAULT_NAME, periods, durationMinutes)
+
+        /** The protected default is always first, even before stored preferences load. */
+        fun withDefault(schemes: List<PeriodTimeScheme>, fallback: PeriodTimeScheme): List<PeriodTimeScheme> =
+            listOf(schemes.firstOrNull { it.isDefault } ?: fallback) + schemes.filterNot { it.isDefault }
+
         fun encode(schemes: List<PeriodTimeScheme>): String = JSONArray().apply {
             schemes.forEach { scheme ->
                 put(JSONObject().apply {

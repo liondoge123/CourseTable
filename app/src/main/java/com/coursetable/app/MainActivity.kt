@@ -60,7 +60,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import com.coursetable.app.ui.liquid.rememberImeVisible
-import com.coursetable.app.ui.liquid.ClearFocusOnImeDismiss
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,6 +81,7 @@ import com.coursetable.app.ui.liquid.GlassStyle
 import com.coursetable.app.ui.liquid.Icon
 import com.coursetable.app.ui.liquid.LiquidAmbientBackground
 import com.coursetable.app.ui.liquid.LiquidBackdropHost
+import com.coursetable.app.ui.liquid.LiquidMetaballNavigationDock
 import com.coursetable.app.ui.liquid.LiquidNavigationTabs
 import com.coursetable.app.ui.liquid.Surface
 import com.coursetable.app.ui.liquid.Text
@@ -96,7 +96,6 @@ import java.time.LocalDate
 
 private val FloatingDockInset = 88.dp
 private val FloatingDockHeight = 54.dp
-private val DockActionHeight = 36.dp
 
 class MainActivity : ComponentActivity() {
 
@@ -158,7 +157,6 @@ private fun MainScreen(
     var activeImport by rememberSaveable { mutableStateOf<ImportEntry?>(null) }
     var nestedPageOpen by remember { mutableStateOf(false) }
     val imeVisible = rememberImeVisible()
-    ClearFocusOnImeDismiss(imeVisible)
 
     LaunchedEffect(incoming) {
         if (incoming != null) {
@@ -309,18 +307,30 @@ private fun FloatingNavigationDock(
     onActionClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(
+    val actionVisible = selectedTab == RootDestination.TIMETABLE || selectedTab == RootDestination.COURSES
+    LiquidMetaballNavigationDock(
+        actionVisible = actionVisible,
+        onActionClick = onActionClick,
+        actionContentDescription = "添加课程",
         modifier = modifier
             .widthIn(max = 460.dp)
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 20.dp)
-    ) {
+            .padding(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 20.dp),
+        actionIcon = {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = LiquidTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    ) { dockWidth, drawSurface ->
         val selectedIndex = when (selectedTab) {
             RootDestination.TIMETABLE -> 0
             RootDestination.COURSES -> 1
-            RootDestination.IMPORT -> 3
-            RootDestination.SETTINGS -> 4
+            RootDestination.IMPORT -> 2
+            RootDestination.SETTINGS -> 3
         }
         LiquidNavigationTabs(
             selectedIndex = selectedIndex,
@@ -328,17 +338,14 @@ private fun FloatingNavigationDock(
                 val destination = when (index) {
                     0 -> RootDestination.TIMETABLE
                     1 -> RootDestination.COURSES
-                    3 -> RootDestination.IMPORT
-                    4 -> RootDestination.SETTINGS
+                    2 -> RootDestination.IMPORT
+                    3 -> RootDestination.SETTINGS
                     else -> null
                 }
                 destination?.let(onTabSelected)
             },
-            tabCount = 5,
-            selectableIndices = listOf(0, 1, 3, 4),
-            actionIndex = 2,
-            onAction = onActionClick,
-            actionContentDescription = "添加课程",
+            tabCount = 4,
+            drawSurface = drawSurface,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(FloatingDockHeight)
@@ -359,10 +366,9 @@ private fun FloatingNavigationDock(
                 contentColor = contentColor,
                 itemScale = itemScale
             )
-            DockActionVisual(itemScale = itemScale)
             DockItem(
                 selected = selectedTab == RootDestination.IMPORT,
-                onClick = { selectTab(3) },
+                onClick = { selectTab(2) },
                 icon = Icons.Filled.CloudDownload,
                 label = "导入",
                 contentColor = contentColor,
@@ -370,42 +376,11 @@ private fun FloatingNavigationDock(
             )
             DockItem(
                 selected = selectedTab == RootDestination.SETTINGS,
-                onClick = { selectTab(4) },
+                onClick = { selectTab(3) },
                 icon = Icons.Filled.Settings,
                 label = "设置",
                 contentColor = contentColor,
                 itemScale = itemScale
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.DockActionVisual(itemScale: Float) {
-    val actionContainerColor = LiquidTheme.colorScheme.primary.copy(alpha = 0.78f)
-    val actionContentColor = LiquidTheme.colorScheme.onPrimary
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .graphicsLayer {
-                scaleX = itemScale
-                scaleY = itemScale
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(width = 56.dp, height = DockActionHeight)
-                .clip(RoundedCornerShape(18.dp))
-                .background(actionContainerColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = null,
-                tint = actionContentColor,
-                modifier = Modifier.size(20.dp)
             )
         }
     }

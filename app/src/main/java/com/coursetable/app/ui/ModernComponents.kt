@@ -56,13 +56,15 @@ fun PageHeader(
 @Composable
 fun SectionFrame(
     modifier: Modifier = Modifier,
+    outlined: Boolean = false,
+    containerAlpha: Float = 1f,
     content: @Composable () -> Unit
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = LiquidTheme.shapes.medium,
-        color = LiquidTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, LiquidTheme.colorScheme.outlineVariant),
+        color = LiquidTheme.colorScheme.surface.copy(alpha = containerAlpha),
+        border = if (outlined) BorderStroke(1.dp, LiquidTheme.colorScheme.outlineVariant) else null,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
@@ -79,8 +81,8 @@ internal fun FormSectionCard(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = LiquidTheme.colorScheme.surface.copy(alpha = 0.72f),
-        border = BorderStroke(1.dp, LiquidTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        color = LiquidTheme.colorScheme.surface.copy(alpha = 0.20f),
+        border = null
     ) {
         Column(
             modifier = Modifier.padding(16.dp),

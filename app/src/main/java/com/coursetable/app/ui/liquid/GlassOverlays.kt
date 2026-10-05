@@ -1,7 +1,16 @@
 package com.coursetable.app.ui.liquid
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.coroutineScope
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
@@ -16,6 +25,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -23,6 +34,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -36,11 +50,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.recalculateWindowInsets
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -132,8 +151,8 @@ fun ModalBottomSheet(
         MutableTransitionState(false).apply { targetState = true }
     }
     val currentCanDismiss by androidx.compose.runtime.rememberUpdatedState(canDismiss)
-    fun dismissAnimated(afterAction: (() -> Unit)? = null) {
-        if (!currentCanDismiss()) { drag = 0f; return }
+    fun dismissAnimated(afterAction: (() -> Unit)? = null, checkDismiss: Boolean = true) {
+        if (checkDismiss && !currentCanDismiss()) { drag = 0f; return }
         if (!dismissRequested) {
             dismissRequested = true
             pendingDismissAction = afterAction
@@ -195,16 +214,18 @@ fun ModalBottomSheet(
     }
 
     GlassOverlayPortal(OverlayDestination.SHEET) {
-        BackHandler(
+        val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
-            onBack = { dismissAnimated() }
+            canCommit = { currentCanDismiss() },
+            onBack = { dismissAnimated(checkDismiss = false) }
         )
         CompositionLocalProvider(LocalDialogDismissController provides dismissController) {
             Box(Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     visibleState = scrimVisibility,
+                    modifier = Modifier.predictiveBackScrim(back),
                     enter = fadeIn(tween(220, easing = LinearOutSlowInEasing)),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                    exit = if (back.completed) ExitTransition.None else fadeOut(tween(180, easing = FastOutSlowInEasing))
                 ) {
                     Box(
                         Modifier
@@ -219,12 +240,12 @@ fun ModalBottomSheet(
                 }
                 AnimatedVisibility(
                     visibleState = visibility,
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    modifier = Modifier.align(Alignment.BottomCenter).predictiveBackTransform(back, BackPresentation.SHEET),
                     enter = slideInVertically(
                         animationSpec = tween(280),
                         initialOffsetY = { fullHeight -> fullHeight }
                     ) + fadeIn(tween(180)),
-                    exit = slideOutVertically(
+                    exit = if (back.completed) ExitTransition.None else slideOutVertically(
                         animationSpec = tween(220),
                         targetOffsetY = { fullHeight -> fullHeight }
                     ) + fadeOut(tween(160))
@@ -245,11 +266,12 @@ fun ModalBottomSheet(
                         shadowElevation = 24.dp,
                         style = OverlayGlassStyle.SHEET
                     ) {
+                        // Keep the sheet frame anchored when the IME opens. Full-height
+                        // editors handle keyboard avoidance inside their own fixed bounds.
                         Column(
                             Modifier
                                 .fillMaxWidth()
                                 .navigationBarsPadding()
-                                .imePadding()
                         ) {
                             Box(
                                 Modifier
@@ -300,8 +322,14 @@ fun AlertDialog(
     confirmButtonEmphasized: Boolean = true,
     confirmButtonRole: DialogActionRole = if (confirmButtonEmphasized) DialogActionRole.Primary else DialogActionRole.Secondary,
     dismissButtonRole: DialogActionRole = DialogActionRole.Secondary,
-    additionalActions: List<DialogAction> = emptyList()
+    additionalActions: List<DialogAction> = emptyList(),
+    fixedEditorFrame: Boolean = false,
+    pageTransitionKey: Any? = null
 ) {
+    val page = DialogPagePresentation(
+        pageTransitionKey ?: Unit, title, text, confirmButton, dismissButton,
+        actionShape, confirmButtonRole, dismissButtonRole, additionalActions, fixedEditorFrame
+    )
     var dismissRequested by remember { mutableStateOf(false) }
     var pendingDismissAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val visibility = remember {
@@ -338,19 +366,22 @@ fun AlertDialog(
     }
 
     GlassOverlayPortal(OverlayDestination.DIALOG) {
-        BackHandler(
+        val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
-            onBack = { onBackRequest?.invoke() ?: dismissAnimated() }
+            canCommit = { onBackRequest == null },
+            onRejected = { onBackRequest?.invoke() },
+            onBack = { dismissAnimated() }
         )
         CompositionLocalProvider(LocalDialogDismissController provides dismissController) {
             Box(
-                Modifier.fillMaxSize().imePadding(),
+                Modifier.fillMaxSize().then(if (fixedEditorFrame || pageTransitionKey != null) Modifier else Modifier.imePadding()),
                 contentAlignment = Alignment.Center
             ) {
                 AnimatedVisibility(
                     visibleState = scrimVisibility,
+                    modifier = Modifier.predictiveBackScrim(back),
                     enter = fadeIn(tween(220, easing = LinearOutSlowInEasing)),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                    exit = if (back.completed) ExitTransition.None else fadeOut(tween(180, easing = FastOutSlowInEasing))
                 ) {
                     Box(
                         Modifier
@@ -366,7 +397,11 @@ fun AlertDialog(
 
                 AnimatedVisibility(
                     visibleState = visibility,
-                    modifier = Modifier.padding(horizontal = 24.dp),
+                    // Editors retain the same frame throughout the IME animation.
+                    // Ordinary dialogs still fit above the keyboard and below system bars.
+                    modifier = (if (fixedEditorFrame || pageTransitionKey != null) Modifier.systemBarsPadding() else Modifier.safeDrawingPadding())
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                        .predictiveBackTransform(back, BackPresentation.DIALOG),
                     enter = scaleIn(
                         initialScale = 0.88f,
                         animationSpec = spring(
@@ -374,44 +409,174 @@ fun AlertDialog(
                             stiffness = Spring.StiffnessMediumLow
                         )
                     ) + fadeIn(tween(200, easing = LinearOutSlowInEasing)),
-                    exit = scaleOut(
+                    exit = if (back.completed) ExitTransition.None else scaleOut(
                         targetScale = 0.92f,
                         animationSpec = tween(180, easing = FastOutSlowInEasing)
                     ) + fadeOut(tween(160, easing = FastOutSlowInEasing))
                 ) {
-                    OverlayGlassSurface(
-                        modifier = Modifier
-                            .widthIn(max = 480.dp)
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {}
-                            ),
-                        shape = RoundedRectangle(32.dp),
-                        shadowElevation = 0.dp,
-                        style = OverlayGlassStyle.DIALOG
-                    ) {
-                        Column {
-                            if (title != null) {
-                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurface) {
-                                    Box(Modifier.padding(start = 28.dp, top = 24.dp, end = 28.dp, bottom = 12.dp)) {
-                                        title()
-                                    }
-                                }
-                            }
-                            if (text != null) {
-                                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurfaceVariant) {
-                                    Box(Modifier.weight(1f, fill = false).padding(horizontal = 24.dp, vertical = 12.dp)) {
-                                        text()
-                                    }
-                                }
-                            }
-                            LibraryDialogActions(dismissButton, confirmButton, actionShape, confirmButtonRole, dismissButtonRole, additionalActions)
-                        }
+                    if (pageTransitionKey != null) {
+                        DialogTransitionSurface(page)
+                    } else {
+                        DialogPageSurface(page)
                     }
                 }
             }
+        }
+    }
+}
+
+private data class DialogPagePresentation(
+    val key: Any,
+    val title: (@Composable () -> Unit)?,
+    val text: (@Composable () -> Unit)?,
+    val confirmButton: @Composable () -> Unit,
+    val dismissButton: (@Composable () -> Unit)?,
+    val actionShape: Shape,
+    val confirmButtonRole: DialogActionRole,
+    val dismissButtonRole: DialogActionRole,
+    val additionalActions: List<DialogAction>,
+    val fixedEditorFrame: Boolean
+)
+
+@Composable
+private fun DialogTransitionSurface(page: DialogPagePresentation) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val editorHeight = maxHeight * 0.855f
+        val targetOffset = if (page.fixedEditorFrame) -maxHeight * 0.0225f else 0.dp
+        val targetOffsetPx = with(density) { targetOffset.toPx() }
+        val viewportHeightPx = with(density) { maxHeight.toPx() }
+        val cardWidth = minOf(maxWidth, 480.dp)
+        val cardWidthPx = with(density) { cardWidth.toPx() }
+        val viewportWidthPx = with(density) { maxWidth.toPx() }
+        val radiusPx = with(density) { 32.dp.toPx() }
+        var listHeightPx by remember { mutableIntStateOf(0) }
+        var measuredHeightPx by remember { mutableIntStateOf(0) }
+        val visualHeight = remember { Animatable(0f) }
+        val visualOffset = remember { Animatable(0f) }
+        LaunchedEffect(measuredHeightPx, targetOffsetPx) {
+            if (measuredHeightPx == 0) return@LaunchedEffect
+            if (visualHeight.value == 0f) {
+                visualHeight.snapTo(measuredHeightPx.toFloat())
+                visualOffset.snapTo(targetOffsetPx)
+            } else coroutineScope {
+                launch { visualHeight.animateTo(measuredHeightPx.toFloat(), tween(300, easing = FastOutSlowInEasing)) }
+                launch { visualOffset.animateTo(targetOffsetPx, tween(300, easing = FastOutSlowInEasing)) }
+            }
+        }
+        // Sample glass in fixed screen coordinates and reveal it with a moving outline.
+        // Only placement and clipping animate; neither pixels nor content are stretched.
+        val glassShape = remember(viewportWidthPx, viewportHeightPx, cardWidthPx, radiusPx) {
+            object : Shape {
+                override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): Outline {
+                    val height = visualHeight.value.coerceAtLeast(1f)
+                    val left = (viewportWidthPx - cardWidthPx) / 2f
+                    val top = (viewportHeightPx - height) / 2f + visualOffset.value
+                    return Outline.Rounded(RoundRect(left, top, left + cardWidthPx, top + height, CornerRadius(radiusPx)))
+                }
+            }
+        }
+        val contentShape = remember(radiusPx) {
+            object : Shape {
+                override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): Outline =
+                    Outline.Rounded(RoundRect(0f, 0f, size.width, visualHeight.value.coerceAtLeast(1f), CornerRadius(radiusPx)))
+            }
+        }
+        OverlayGlassSurface(
+            modifier = Modifier.fillMaxSize().clip(glassShape)
+                .border(BorderStroke(0.8.dp, LiquidTheme.colorScheme.glassBorder), glassShape),
+            shape = RectangleShape,
+            shadowElevation = 0.dp,
+            style = OverlayGlassStyle.DIALOG,
+            refractionEnabled = false
+        ) { }
+        AnimatedContent(
+            modifier = Modifier.align(Alignment.TopCenter).width(cardWidth)
+                .then(when {
+                    page.fixedEditorFrame -> Modifier.height(editorHeight)
+                    listHeightPx > 0 -> Modifier.height(with(density) { listHeightPx.toDp() })
+                    else -> Modifier
+                })
+                .onSizeChanged { measuredHeightPx = it.height }
+                .offset { IntOffset(0, ((viewportHeightPx - visualHeight.value) / 2f + visualOffset.value).roundToInt()) }
+                .clip(contentShape)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {}),
+            targetState = page,
+            contentKey = { it.key },
+            transitionSpec = {
+                (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                    togetherWith fadeOut(tween(300, easing = FastOutSlowInEasing)))
+                    .using(null)
+            },
+            contentAlignment = Alignment.TopCenter,
+            label = "DialogPageTransition"
+        ) { presentedPage ->
+            DialogPageBody(presentedPage, if (presentedPage.fixedEditorFrame) Modifier.fillMaxWidth().height(editorHeight)
+                else Modifier.wrapContentHeight(unbounded = true).heightIn(max = maxHeight)
+                    .onSizeChanged { listHeightPx = it.height })
+        }
+    }
+}
+@Composable
+private fun DialogPageSurface(page: DialogPagePresentation) {
+    with(page) {
+        // Reserve the previous frame height to preserve its top position,
+        // while shortening only the visible card at the bottom.
+        BoxWithConstraints(
+            if (fixedEditorFrame) Modifier.fillMaxHeight(0.9f) else Modifier
+        ) {
+            OverlayGlassSurface(
+                modifier = Modifier
+                    .widthIn(max = 480.dp)
+                    .fillMaxWidth()
+                    .then(if (fixedEditorFrame) Modifier.height(maxHeight * 0.95f) else Modifier)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedRectangle(32.dp),
+                shadowElevation = 0.dp,
+                style = OverlayGlassStyle.DIALOG,
+                // Large editing frames retain frosted glass without the extra
+                // full-surface lens pass during keyboard/layout updates.
+                refractionEnabled = !fixedEditorFrame
+            ) {
+                DialogPageBody(page, if (fixedEditorFrame) Modifier.fillMaxSize() else Modifier)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogPageBody(page: DialogPagePresentation, modifier: Modifier = Modifier) {
+    with(page) {
+        Column(
+            // Insets must be relative to this floating frame, not the
+            // screen bottom, or its outer margin is counted a second time.
+            modifier.then(if (fixedEditorFrame) Modifier.recalculateWindowInsets().imePadding() else Modifier)
+        ) {
+            if (title != null) {
+                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurface) {
+                    Box(
+                        if (fixedEditorFrame) Modifier.padding(start = 12.dp, top = 12.dp, end = 24.dp, bottom = 4.dp)
+                        else Modifier.padding(start = 28.dp, top = 24.dp, end = 28.dp, bottom = 12.dp)
+                    ) {
+                        title()
+                    }
+                }
+            }
+            if (text != null) {
+                CompositionLocalProvider(LocalContentColor provides LiquidTheme.colorScheme.onSurfaceVariant) {
+                    Box(Modifier.weight(1f, fill = fixedEditorFrame)
+                        .padding(horizontal = 24.dp)
+                        .padding(top = 12.dp, bottom = if (fixedEditorFrame) 8.dp else 12.dp)) {
+                        text()
+                    }
+                }
+            }
+            LibraryDialogActions(dismissButton, confirmButton, actionShape, confirmButtonRole, dismissButtonRole, additionalActions,
+                topPadding = if (fixedEditorFrame) 8.dp else 12.dp)
         }
     }
 }
@@ -423,7 +588,7 @@ internal fun GlassProgressDialog(
     modifier: Modifier = Modifier
 ) {
     GlassOverlayPortal(OverlayDestination.DIALOG) {
-        BackHandler(enabled = true, onBack = {})
+        BackHandler(enabled = LocalBackLayerActive.current && LocalOverlayBackActive.current && !rememberImeVisible(), onBack = {})
         Box(
             Modifier
                 .fillMaxSize()
@@ -731,7 +896,7 @@ fun NumberWheelPickerDialog(
     }
 
     GlassOverlayPortal(OverlayDestination.DIALOG) {
-        BackHandler(
+        val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
             onBack = { dismissAnimated() }
         )
@@ -742,8 +907,9 @@ fun NumberWheelPickerDialog(
             ) {
                 AnimatedVisibility(
                     visibleState = scrimVisibility,
+                    modifier = Modifier.predictiveBackScrim(back),
                     enter = fadeIn(tween(220, easing = LinearOutSlowInEasing)),
-                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                    exit = if (back.completed) ExitTransition.None else fadeOut(tween(180, easing = FastOutSlowInEasing))
                 ) {
                     Box(
                         Modifier
@@ -759,7 +925,7 @@ fun NumberWheelPickerDialog(
 
                 AnimatedVisibility(
                     visibleState = visibility,
-                    modifier = Modifier.padding(horizontal = 24.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp).predictiveBackTransform(back, BackPresentation.DIALOG),
                     enter = scaleIn(
                         initialScale = 0.88f,
                         animationSpec = spring(
@@ -767,7 +933,7 @@ fun NumberWheelPickerDialog(
                             stiffness = Spring.StiffnessMediumLow
                         )
                     ) + fadeIn(tween(200, easing = LinearOutSlowInEasing)),
-                    exit = scaleOut(
+                    exit = if (back.completed) ExitTransition.None else scaleOut(
                         targetScale = 0.92f,
                         animationSpec = tween(180, easing = FastOutSlowInEasing)
                     ) + fadeOut(tween(160, easing = FastOutSlowInEasing))
@@ -906,7 +1072,7 @@ internal fun DropdownMenu(
         pivotFractionY = if (opensDown) 0f else 1f
     )
     GlassOverlayPortal(OverlayDestination.MENU) {
-        BackHandler(
+        val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
             onBack = onDismissRequest
         )
@@ -924,12 +1090,13 @@ internal fun DropdownMenu(
                 content = {
                     AnimatedVisibility(
                         visibleState = visibility,
+                        modifier = Modifier.predictiveBackTransform(back, BackPresentation.MENU, transformOrigin),
                         enter = scaleIn(
                             initialScale = 0.94f,
                             transformOrigin = transformOrigin,
                             animationSpec = tween(190, easing = LinearOutSlowInEasing)
                         ) + fadeIn(tween(130, easing = LinearOutSlowInEasing)),
-                        exit = scaleOut(
+                        exit = if (back.completed) ExitTransition.None else scaleOut(
                             targetScale = 0.96f,
                             transformOrigin = transformOrigin,
                             animationSpec = tween(160, easing = FastOutSlowInEasing)
@@ -980,7 +1147,7 @@ internal fun DropdownMenu(
 }
 
 @Composable
-private fun libraryOverlayDimColor(): Color = if (LiquidTheme.colorScheme.isDark) {
+internal fun libraryOverlayDimColor(): Color = if (LiquidTheme.colorScheme.isDark) {
     Color(0xFF121212).copy(alpha = 0.28f)
 } else {
     Color(0xFF29293A).copy(alpha = 0.10f)
@@ -993,9 +1160,10 @@ private fun LibraryDialogActions(
     actionShape: Shape = Capsule(),
     confirmButtonRole: DialogActionRole = DialogActionRole.Primary,
     dismissButtonRole: DialogActionRole = DialogActionRole.Secondary,
-    additionalActions: List<DialogAction> = emptyList()
+    additionalActions: List<DialogAction> = emptyList(),
+    topPadding: androidx.compose.ui.unit.Dp = 12.dp
 ) {
-    val padding = Modifier.padding(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 24.dp).fillMaxWidth()
+    val padding = Modifier.padding(start = 24.dp, top = topPadding, end = 24.dp, bottom = 24.dp).fillMaxWidth()
     if (additionalActions.isNotEmpty()) {
         Column(padding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             LibraryDialogAction(Modifier.fillMaxWidth(), actionShape, confirmButtonRole, confirmButton)

@@ -1,5 +1,8 @@
 package com.coursetable.app.ui
 
+import com.coursetable.app.data.weeksLabel
+import com.coursetable.app.data.scheduledWeeks
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -69,7 +72,6 @@ import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.PeriodUtils
-import com.coursetable.app.data.WeekType
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.fromStoredLong
@@ -216,12 +218,10 @@ private fun rememberCourses(
     val byFilter = when (filter) {
         WeekFilter.ALL -> courses
         WeekFilter.ODD -> courses.filter {
-            it.weekType != WeekType.EVEN.code &&
-                WeekUtils.weekRangeHasOdd(it.startWeek, it.endWeek)
+            it.scheduledWeeks().any { week -> week % 2 == 1 }
         }
         WeekFilter.EVEN -> courses.filter {
-            it.weekType != WeekType.ODD.code &&
-                WeekUtils.weekRangeHasEven(it.startWeek, it.endWeek)
+            it.scheduledWeeks().any { week -> week % 2 == 0 }
         }
     }
     val notEnded = byFilter.filter { it.lastWeek() >= displayedWeek }
@@ -621,7 +621,6 @@ private fun TimetableGrid(
                         // 仅保留表头下方一条分隔线
                         drawLine(lineColor, Offset(0f, hh), Offset(size.width, hh), line)
                     }
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, containerShape)
             ) {
                 Row(
                     Modifier
@@ -931,7 +930,7 @@ private fun CourseDetailDialog(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            SectionFrame(Modifier.padding(horizontal = 20.dp)) {
+            SectionFrame(Modifier.padding(horizontal = 20.dp), containerAlpha = 0.20f) {
                 Column(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -1000,10 +999,5 @@ private fun DetailRow(
 }
 
 private fun weekRangeText(course: Course): String {
-    val type = when (course.weekType) {
-        WeekType.ODD.code -> "单周"
-        WeekType.EVEN.code -> "双周"
-        else -> ""
-    }
-    return "$type 第${course.startWeek}-${course.endWeek}周".trim()
+    return course.weeksLabel()
 }

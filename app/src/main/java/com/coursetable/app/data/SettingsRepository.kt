@@ -66,7 +66,8 @@ data class AppSettings(
 
 class SettingsRepository(
     private val context: Context,
-    private val timetableDao: TimetableDao
+    private val timetableDao: TimetableDao,
+    private val preferences: DataStore<Preferences> = context.dataStore
 ) {
 
     private object Keys {
@@ -87,18 +88,49 @@ class SettingsRepository(
     }
 
     /** 当前激活课表 id */
-    val activeTimetableId: Flow<Long> = context.dataStore.data.map { it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L }
+    val activeTimetableId: Flow<Long> = preferences.data.map { it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L }
 
-    val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = context.dataStore.data.map {
-        PeriodTimeScheme.decode(it[Keys.PERIOD_TIME_SCHEMES])
+    val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = preferences.data.map {
+        val id = it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L
+        val schemes = PeriodTimeScheme.decode(it[Keys.PERIOD_TIME_SCHEMES])
+            .filter { scheme -> !scheme.isDefault || scheme.id == PeriodTimeScheme.defaultId(id) }
+        PeriodTimeScheme.withDefault(schemes, PeriodTimeScheme.defaultFor(id))
+    }
+
+    /** Seed from the table's existing times so upgrades and imported tables retain their schedule. */
+    private suspend fun ensureDefaultTimeScheme(timetableId: Long) {
+        val timetable = timetableDao.byId(timetableId) ?: return
+        preferences.edit { prefs ->
+            val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
+            if (schemes.none { it.id == PeriodTimeScheme.defaultId(timetableId) }) {
+                prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(
+                    schemes + if (PeriodUtils.validatePeriods(timetable.periods()) == null && timetable.periodDurationMinutes > 0) {
+                        PeriodTimeScheme.defaultFor(timetableId, timetable.periods(), timetable.periodDurationMinutes)
+                    } else PeriodTimeScheme.defaultFor(timetableId)
+                )
+            }
+        }
+    }
+
+    suspend fun saveCurrentPeriodTimeScheme(timetableId: Long, scheme: PeriodTimeScheme) {
+        if (scheme.isDefault) {
+            val normalized = scheme.copy(id = PeriodTimeScheme.defaultId(timetableId), name = PeriodTimeScheme.DEFAULT_NAME)
+            require(PeriodUtils.validatePeriods(normalized.periods) == null && normalized.durationMinutes > 0)
+            preferences.edit { prefs ->
+                val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
+                prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(schemes.filterNot { it.id == normalized.id } + normalized)
+            }
+        }
+        applyPeriodTimeScheme(timetableId, scheme)
     }
 
     suspend fun savePeriodTimeScheme(scheme: PeriodTimeScheme) {
+        require(!scheme.isDefault) { "默认方案请在默认时间编辑中保存" }
         val normalized = scheme.copy(name = scheme.name.trim())
         require(PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(normalized))) == listOf(normalized)) {
             "时间方案不合法"
         }
-        context.dataStore.edit { prefs ->
+        preferences.edit { prefs ->
             val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
             require(schemes.none { it.id != normalized.id && it.name == normalized.name }) {
                 "已有同名时间方案"
@@ -110,16 +142,36 @@ class SettingsRepository(
         }
     }
 
-    suspend fun deletePeriodTimeScheme(id: String) {
-        context.dataStore.edit { prefs ->
+    suspend fun deletePeriodTimeScheme(id: String, timetableId: Long? = null) {
+        require(!PeriodTimeScheme.isDefaultId(id)) { "默认方案不能删除" }
+        val targetId = timetableId ?: activeTimetableId.first()
+        ensureDefaultTimeScheme(targetId)
+        var removed: PeriodTimeScheme? = null
+        preferences.edit { prefs ->
+            removed = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES]).firstOrNull { it.id == id }
             prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(
                 PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES]).filterNot { it.id == id }
             )
+        }
+        val table = timetableDao.byId(targetId) ?: return
+        val remaining = PeriodTimeScheme.decode(preferences.data.first()[Keys.PERIOD_TIME_SCHEMES])
+        if (remaining.none { !it.isDefault } || removed?.matches(table.periods(), table.periodDurationMinutes) == true) {
+            remaining.firstOrNull { it.id == PeriodTimeScheme.defaultId(targetId) }?.let { applyPeriodTimeScheme(targetId, it) }
+        }
+    }
+
+    private suspend fun useDefaultIfNoCustomSchemes(timetableId: Long) {
+        val schemes = PeriodTimeScheme.decode(preferences.data.first()[Keys.PERIOD_TIME_SCHEMES])
+        if (schemes.none { !it.isDefault }) {
+            val default = schemes.firstOrNull { it.id == PeriodTimeScheme.defaultId(timetableId) } ?: return
+            val table = timetableDao.byId(timetableId) ?: return
+            if (!default.matches(table.periods(), table.periodDurationMinutes)) applyPeriodTimeScheme(timetableId, default)
         }
     }
 
     /** 应用到打开方案面板的课表，避免异步写入时误改其他课表。 */
     suspend fun applyPeriodTimeScheme(timetableId: Long, scheme: PeriodTimeScheme) {
+        ensureDefaultTimeScheme(timetableId)
         val timetable = requireNotNull(timetableDao.byId(timetableId)) { "课表不存在" }
         timetableDao.upsert(timetable.copy(
             periodsCsv = Timetable.serializePeriods(scheme.periods),
@@ -128,7 +180,7 @@ class SettingsRepository(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val settings: Flow<AppSettings> = context.dataStore.data.flatMapLatest { prefs ->
+    val settings: Flow<AppSettings> = preferences.data.flatMapLatest { prefs ->
         val activeId = prefs[Keys.ACTIVE_TIMETABLE_ID] ?: 0L
         val timetableFlow = if (activeId > 0) timetableDao.observeById(activeId) else flowOf(null)
         timetableFlow.map { timetable -> buildSettings(prefs, timetable) }
@@ -175,7 +227,7 @@ class SettingsRepository(
         activeTimetableId: Long? = null
     ) {
         // DataStore 部分
-        context.dataStore.edit { prefs ->
+        preferences.edit { prefs ->
             if (cardAlignLeft != null) prefs[Keys.CARD_ALIGN_LEFT] = if (cardAlignLeft) 1 else 0
             if (showNonCurrentWeek != null) prefs[Keys.SHOW_NON_CURRENT_WEEK] = if (showNonCurrentWeek) 1 else 0
             if (themeMode != null) prefs[Keys.THEME_MODE] = themeMode
@@ -186,7 +238,7 @@ class SettingsRepository(
         }
         // Room（当前课表）部分
         if (semesterStart != null || totalWeeks != null || periods != null || periodDurationMinutes != null) {
-            val activeId = context.dataStore.data.first()[Keys.ACTIVE_TIMETABLE_ID] ?: 0L
+            val activeId = preferences.data.first()[Keys.ACTIVE_TIMETABLE_ID] ?: 0L
             val current = timetableDao.byId(activeId) ?: return
             timetableDao.upsert(
                 current.copy(
@@ -215,7 +267,7 @@ class SettingsRepository(
     /** 读取旧版本存储在 DataStore 的学期设置（用于迁移播种），读取后清除 */
     suspend fun consumeLegacySemester(): Timetable? {
         var result: Timetable? = null
-        context.dataStore.edit { prefs ->
+        preferences.edit { prefs ->
             val hasLegacy = prefs.contains(Keys.LEGACY_SEMESTER_START) ||
                 prefs.contains(Keys.LEGACY_TOTAL_WEEKS) ||
                 prefs.contains(Keys.LEGACY_PERIODS)
@@ -244,16 +296,20 @@ class SettingsRepository(
     }
 
     suspend fun setActiveTimetable(id: Long) {
-        context.dataStore.edit { it[Keys.ACTIVE_TIMETABLE_ID] = id }
+        ensureDefaultTimeScheme(id)
+        useDefaultIfNoCustomSchemes(id)
+        preferences.edit { it[Keys.ACTIVE_TIMETABLE_ID] = id }
     }
 
     /** 仅在尚未设置激活课表时写入（应用启动播种用，避免覆盖用户选择） */
     suspend fun ensureActiveTimetable(id: Long) {
-        context.dataStore.edit { prefs ->
+        preferences.edit { prefs ->
             if (!prefs.contains(Keys.ACTIVE_TIMETABLE_ID)) {
                 prefs[Keys.ACTIVE_TIMETABLE_ID] = id
             }
         }
+        ensureDefaultTimeScheme(activeTimetableId.first())
+        useDefaultIfNoCustomSchemes(activeTimetableId.first())
     }
 }
 

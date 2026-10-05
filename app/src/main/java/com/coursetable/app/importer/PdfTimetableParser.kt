@@ -103,7 +103,8 @@ data class CandidateCourse(
     val needsReview: Boolean = false,
     val sourceRegions: Set<String> = emptySet(),
     val sourceRecords: List<CandidateCourse> = emptyList(),
-    val draftId: String? = null
+    val draftId: String? = null,
+    val selectedWeeksCsv: String = ""
 ) {
     fun belongsTo(id: String?) = id != null && (sourceRegion == id || id in sourceRegions)
     fun excludingRegion(id: String): List<CandidateCourse> = if (!belongsTo(id)) listOf(this)
