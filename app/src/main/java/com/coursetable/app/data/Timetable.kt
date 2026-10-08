@@ -20,7 +20,9 @@ data class Timetable(
     val totalWeeks: Int = 18,
     /** 节次时间 CSV："08:00-08:45;08:55-09:40;..." */
     val periodsCsv: String = "",
-    val periodDurationMinutes: Int = 45
+    val periodDurationMinutes: Int = 45,
+    /** 当前激活的节次时间方案 ID，null 表示使用自定义时间 */
+    val periodSchemeId: String? = null
 ) {
     fun semesterStart(): LocalDate = LocalDate.ofEpochDay(semesterStartEpochDay)
 

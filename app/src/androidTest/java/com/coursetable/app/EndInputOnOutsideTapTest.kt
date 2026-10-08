@@ -190,4 +190,69 @@ class EndInputOnOutsideTapTest {
         compose.onNodeWithContentDescription("保存").performTouchInput { click() }
         compose.runOnIdle { assertEquals(2, saved?.dayOfWeek) }
     }
+    @Test fun periodTimeSchemeNameFieldClearsFocusOnOutsideTap() {
+        val currentTimes = listOf(
+            com.coursetable.app.data.PeriodTime(java.time.LocalTime.of(8, 0), java.time.LocalTime.of(8, 45))
+        )
+        val scheme = com.coursetable.app.data.PeriodTimeScheme("test", "测试方案", currentTimes, 45)
+        compose.setContent {
+            val activity = LocalActivity.current as ComponentActivity
+            DisposableEffect(activity) { activity.enableEdgeToEdge(); onDispose {} }
+            val visible = rememberImeVisible()
+            SideEffect { imeVisible = visible }
+            CourseTableTheme {
+                LiquidBackdropHost(Modifier.fillMaxSize()) {
+                    com.coursetable.app.ui.PeriodTimeSchemesDialog(
+                        schemes = listOf(scheme),
+                        periods = currentTimes,
+                        durationMinutes = 45,
+                        onSave = {},
+                        onApply = {},
+                        onSaveCurrent = {},
+                        onDelete = {},
+                        onDismiss = {}
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("测试方案").performClick()
+        compose.waitForIdle()
+        openKeyboard("scheme-name-input")
+        compose.onNodeWithTag("scheme-name-input").assertIsFocused()
+
+        compose.onNodeWithText("默认课时长").performTouchInput { click() }
+        compose.onNodeWithTag("scheme-name-input").assertIsNotFocused()
+        compose.waitUntil(5000) { !imeVisible }
+    }
+
+    @Test fun timetableNameFieldClearsFocusOnOutsideTap() {
+        val tables = listOf(com.coursetable.app.data.Timetable(1L, "主课表", 16, 12, ""))
+        compose.setContent {
+            val activity = LocalActivity.current as ComponentActivity
+            DisposableEffect(activity) { activity.enableEdgeToEdge(); onDispose {} }
+            val visible = rememberImeVisible()
+            SideEffect { imeVisible = visible }
+            CourseTableTheme {
+                LiquidBackdropHost(Modifier.fillMaxSize()) {
+                    com.coursetable.app.ui.TimetableManageScreen(
+                        timetables = tables,
+                        activeId = 1L,
+                        onBack = {},
+                        onSwitch = {},
+                        onCreate = {},
+                        onRename = { _, _ -> },
+                        onDelete = {}
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("新建课表").performClick()
+        compose.waitForIdle()
+        openKeyboard("timetable-name-input")
+        compose.onNodeWithTag("timetable-name-input").assertIsFocused()
+
+        compose.onNodeWithTag("name-dialog-title", useUnmergedTree = true).performTouchInput { click() }
+        compose.onNodeWithTag("timetable-name-input").assertIsNotFocused()
+        compose.waitUntil(5000) { !imeVisible }
+    }
 }

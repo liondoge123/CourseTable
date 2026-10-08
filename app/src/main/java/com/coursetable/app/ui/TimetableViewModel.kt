@@ -13,6 +13,7 @@ import com.coursetable.app.data.CourseRepository
 import com.coursetable.app.data.SettingsRepository
 import com.coursetable.app.data.Timetable
 import com.coursetable.app.data.TimetableRepository
+import com.coursetable.app.ui.theme.nextUnusedCourseColor
 import com.coursetable.app.util.WeekUtils
 import java.time.LocalDate
 import kotlinx.coroutines.flow.SharingStarted
@@ -95,6 +96,7 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     }
 
     fun openCellEditor(dayOfWeek: Int, startSection: Int) {
+        val nextColor = nextUnusedCourseColor(courses.value)
         editingCourse = Course(
             id = 0,
             name = "",
@@ -104,7 +106,7 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
             startWeek = displayedWeek(),
             endWeek = latestSettings.totalWeeks,
             weekType = 0,
-            color = 0xFF4B6EAF
+            color = nextColor
         )
         editorOpen = true
     }

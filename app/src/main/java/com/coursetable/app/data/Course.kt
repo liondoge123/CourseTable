@@ -50,7 +50,7 @@ data class Course(
     /** 对应 [WeekType.code] */
     val weekType: Int = WeekType.ALL.code,
     /** ARGB 颜色（Long） */
-    val color: Long = 0xFF4B6EAF,
+    val color: Long = 0xFF0A84FF,
     /** Explicit non-contiguous weeks; blank uses startWeek/endWeek/weekType. */
     @androidx.room.ColumnInfo(defaultValue = "''") val selectedWeeksCsv: String = ""
 ) {
@@ -121,7 +121,7 @@ interface CourseDao {
     suspend fun deleteTimetable(id: Long)
 }
 
-@Database(entities = [Course::class, Timetable::class], version = 3, exportSchema = true)
+@Database(entities = [Course::class, Timetable::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun courseDao(): CourseDao
     abstract fun timetableDao(): TimetableDao
@@ -129,6 +129,12 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `timetables` ADD COLUMN `periodSchemeId` TEXT DEFAULT NULL")
+            }
+        }
 
         internal val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -160,7 +166,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "coursetable.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
             }
     }
 }

@@ -10,6 +10,9 @@ import androidx.activity.BackEventCompat
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.luminance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -41,6 +44,8 @@ class RootNavigationTest {
 
     @Test fun settingsSubpageKeepsItsParentAndSupportsCancelledBack() {
         composeRule.onAllNodesWithText("设置")[0].performClick()
+        val parentPixels = composeRule.onRoot().captureToImage().toPixelMap()
+        val statusBarBackground = parentPixels[parentPixels.width / 2, 1].luminance()
         composeRule.onNodeWithText("课表管理").performClick()
         composeRule.onNodeWithContentDescription("返回").assertIsDisplayed()
         val window = composeRule.onRoot().getUnclippedBoundsInRoot()
@@ -51,6 +56,9 @@ class RootNavigationTest {
         swipeBack(cancel = true) {
             val movingPage = composeRule.onNodeWithTag("timetable-manage-page").getUnclippedBoundsInRoot()
             assertTrue("Top of the full page must move with the gesture", movingPage.top > window.top)
+            val previewPixels = composeRule.onRoot().captureToImage().toPixelMap()
+            assertTrue("The scrim must also dim the retained parent's status bar background",
+                previewPixels[previewPixels.width / 2, 1].luminance() < statusBarBackground)
         }
         composeRule.onNodeWithContentDescription("返回").assertIsDisplayed()
         swipeBack(cancel = false)

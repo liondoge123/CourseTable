@@ -2,7 +2,9 @@ package com.coursetable.app.importer
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import com.coursetable.app.data.Course
 import com.coursetable.app.ui.theme.CourseColorPalette
+import com.coursetable.app.ui.theme.nextUnusedCourseColor
 import com.coursetable.app.ui.theme.toArgbLong
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -48,5 +50,45 @@ class ColorEncodingTest {
             val alpha = (argb ushr 24) and 0xFF
             assertEquals("调色板中所有颜色必须完全不透明 (alpha=255)", 0xFF, alpha)
         }
+    }
+
+    @Test
+    fun nextUnusedCourseColorPicksFirstWhenEmpty() {
+        val result = nextUnusedCourseColor(emptyList())
+        assertEquals(CourseColorPalette[0].toArgbLong(), result)
+    }
+
+    @Test
+    fun nextUnusedCourseColorPicksFirstUnusedInOrder() {
+        val color0 = CourseColorPalette[0].toArgbLong()
+        val color1 = CourseColorPalette[1].toArgbLong()
+        val color2 = CourseColorPalette[2].toArgbLong()
+
+        val courseA = Course(id = 1, name = "数学", dayOfWeek = 1, startSection = 1, duration = 2, startWeek = 1, endWeek = 16, color = color0)
+        assertEquals(color1, nextUnusedCourseColor(listOf(courseA)))
+
+        // 跳跃使用：用了 0 和 2，应自动选择未用的 1
+        val courseB = Course(id = 2, name = "英语", dayOfWeek = 2, startSection = 1, duration = 2, startWeek = 1, endWeek = 16, color = color2)
+        assertEquals(color1, nextUnusedCourseColor(listOf(courseA, courseB)))
+    }
+
+    @Test
+    fun nextUnusedCourseColorDoesNotOvercountSameCourse() {
+        val color0 = CourseColorPalette[0].toArgbLong()
+        val color1 = CourseColorPalette[1].toArgbLong()
+
+        // 同一门课有两次排课，不应导致其颜色权重翻倍影响下一个新课的选择
+        val mathMon = Course(id = 1, name = "高数", dayOfWeek = 1, startSection = 1, duration = 2, startWeek = 1, endWeek = 16, color = color0)
+        val mathThu = Course(id = 2, name = "高数", dayOfWeek = 4, startSection = 1, duration = 2, startWeek = 1, endWeek = 16, color = color0)
+        assertEquals(color1, nextUnusedCourseColor(listOf(mathMon, mathThu)))
+    }
+
+    @Test
+    fun nextUnusedCourseColorCyclesWhenAll12Used() {
+        val all12Courses = CourseColorPalette.mapIndexed { idx, c ->
+            Course(id = idx.toLong() + 1, name = "课程$idx", dayOfWeek = 1, startSection = 1, duration = 2, startWeek = 1, endWeek = 16, color = c.toArgbLong())
+        }
+        // 当全部 12 色均被选用过一遍时，轮转回到第一个最少使用的颜色
+        assertEquals(CourseColorPalette[0].toArgbLong(), nextUnusedCourseColor(all12Courses))
     }
 }

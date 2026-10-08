@@ -152,7 +152,7 @@ object BackupManager {
                     startWeek = startWeek,
                     endWeek = endWeek,
                     weekType = o.optInt("weekType", 0).coerceIn(0, 2),
-                    color = o.optLong("color", 0xFF4B6EAF),
+                    color = o.optLong("color", 0xFF0A84FF),
                     selectedWeeksCsv = com.coursetable.app.data.parseSelectedWeeks(o.optString("selectedWeeksCsv").take(240)).joinToString(",")
                 )
             )

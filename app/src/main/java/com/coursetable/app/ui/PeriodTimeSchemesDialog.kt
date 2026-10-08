@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +48,7 @@ fun PeriodTimeSchemesDialog(
     schemes: List<PeriodTimeScheme>,
     periods: List<PeriodTime>,
     durationMinutes: Int,
+    currentSchemeId: String? = null,
     onSave: suspend (PeriodTimeScheme) -> Unit,
     onApply: suspend (PeriodTimeScheme) -> Unit,
     onSaveCurrent: suspend (PeriodTimeScheme) -> Unit,
@@ -61,6 +64,23 @@ fun PeriodTimeSchemesDialog(
     var deleteTarget by remember { mutableStateOf<PeriodTimeScheme?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingSchemeId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentSchemeId) {
+        if (pendingSchemeId == currentSchemeId) {
+            pendingSchemeId = null
+        }
+    }
+
+    val effectiveSchemeId = pendingSchemeId ?: currentSchemeId
+    val resolvedActiveSchemeId = remember(availableSchemes, periods, durationMinutes, effectiveSchemeId, pendingSchemeId) {
+        if (pendingSchemeId != null) {
+            pendingSchemeId
+        } else if (effectiveSchemeId != null) {
+            availableSchemes.firstOrNull { it.id == effectiveSchemeId && it.matches(periods, durationMinutes) }?.id
+        } else {
+            availableSchemes.firstOrNull { it.isDefault && it.matches(periods, durationMinutes) }?.id
+        }
+    }
 
     fun returnToList() {
         draft = null
@@ -110,7 +130,12 @@ fun PeriodTimeSchemesDialog(
         val saveCurrent = editingCurrent
         runOperation(
             action = { if (saveCurrent) onSaveCurrent(normalized) else onSave(normalized) },
-            onSuccess = { returnToList() }
+            onSuccess = {
+                if (saveCurrent) {
+                    pendingSchemeId = normalized.id
+                }
+                returnToList()
+            }
         )
     }
 
@@ -144,9 +169,10 @@ fun PeriodTimeSchemesDialog(
                     Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.Top
                 ) {
-                    if (availableSchemes.none { it.matches(periods, durationMinutes) }) {
+                    if (resolvedActiveSchemeId == null) {
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) {
+                                if (pendingSchemeId != null) return@clickable
                                 openEditor(PeriodTimeScheme("current", "当前自定义", periods, durationMinutes), current = true)
                             }.heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -160,9 +186,12 @@ fun PeriodTimeSchemesDialog(
                         HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
                     availableSchemes.forEach { scheme ->
-                        val selected = scheme.matches(periods, durationMinutes)
+                        val selected = scheme.id == resolvedActiveSchemeId
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) { openEditor(scheme, current = scheme.isDefault) }
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) {
+                                if (pendingSchemeId != null) return@clickable
+                                openEditor(scheme, current = scheme.isDefault)
+                            }
                                 .heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -171,10 +200,30 @@ fun PeriodTimeSchemesDialog(
                                 Text("${scheme.periods.size} 节", style = MaterialTheme.typography.bodySmall)
                             }
                             TextButton(
-                                onClick = { runOperation({ onApply(scheme) }) },
-                                enabled = !busy && !selected
+                                onClick = {
+                                    if (selected || busy || pendingSchemeId != null) return@TextButton
+                                    pendingSchemeId = scheme.id
+                                    scope.launch {
+                                        try {
+                                            onApply(scheme)
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (_: Exception) {
+                                            pendingSchemeId = null
+                                            error = "选用失败，请重试"
+                                        }
+                                    }
+                                },
+                                enabled = !busy && !selected,
+                                modifier = Modifier.defaultMinSize(minWidth = 64.dp)
                             ) { Text(if (selected) "已选用" else "选用") }
-                            if (!scheme.isDefault) IconButton(onClick = { deleteTarget = scheme }, enabled = !busy) {
+                            if (!scheme.isDefault) IconButton(
+                                onClick = {
+                                    if (pendingSchemeId != null || busy) return@IconButton
+                                    deleteTarget = scheme
+                                },
+                                enabled = !busy
+                            ) {
                                 Icon(Icons.Filled.Delete, "删除${scheme.name}", modifier = Modifier.size(18.dp))
                             }
                         }
@@ -202,7 +251,7 @@ fun PeriodTimeSchemesDialog(
                             containerAlpha = 0.55f,
                             singleLine = true,
                             enabled = !busy,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().testTag("scheme-name-input")
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -288,9 +337,13 @@ fun PeriodTimeSchemesDialog(
             confirmButton = {
                 val controller = LocalDialogDismissController.current
                 TextButton(onClick = {
+                    val deletedId = scheme.id
                     val action = {
                         deleteTarget = null
-                        runOperation({ onDelete(scheme.id) })
+                        runOperation(
+                            action = { onDelete(deletedId) },
+                            onSuccess = { if (pendingSchemeId == deletedId) pendingSchemeId = null }
+                        )
                     }
                     controller?.dismiss(action) ?: action()
                 }) { Text("删除") }

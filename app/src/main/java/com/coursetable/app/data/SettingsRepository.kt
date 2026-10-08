@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -44,7 +45,8 @@ data class AppSettings(
     val themeMode: String = "auto",
     val themeColor: String = "blue",
     val reminderEnabled: Boolean = false,
-    val reminderMinutes: Int = 15
+    val reminderMinutes: Int = 15,
+    val activePeriodSchemeId: String? = null
 ) {
     companion object {
         fun defaultPeriods(): List<PeriodTime> = listOf(
@@ -90,12 +92,14 @@ class SettingsRepository(
     /** 当前激活课表 id */
     val activeTimetableId: Flow<Long> = preferences.data.map { it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L }
 
-    val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = preferences.data.map {
-        val id = it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L
-        val schemes = PeriodTimeScheme.decode(it[Keys.PERIOD_TIME_SCHEMES])
-            .filter { scheme -> !scheme.isDefault || scheme.id == PeriodTimeScheme.defaultId(id) }
-        PeriodTimeScheme.withDefault(schemes, PeriodTimeScheme.defaultFor(id))
-    }
+    val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = preferences.data
+        .map { (it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L) to (it[Keys.PERIOD_TIME_SCHEMES] ?: "") }
+        .distinctUntilChanged()
+        .map { (id, raw) ->
+            val schemes = PeriodTimeScheme.decode(raw)
+                .filter { scheme -> !scheme.isDefault || scheme.id == PeriodTimeScheme.defaultId(id) }
+            PeriodTimeScheme.withDefault(schemes, PeriodTimeScheme.defaultFor(id))
+        }
 
     /** Seed from the table's existing times so upgrades and imported tables retain their schedule. */
     private suspend fun ensureDefaultTimeScheme(timetableId: Long) {
@@ -119,6 +123,7 @@ class SettingsRepository(
             preferences.edit { prefs ->
                 val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
                 prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(schemes.filterNot { it.id == normalized.id } + normalized)
+                prefs[stringPreferencesKey("timetable_${timetableId}_scheme_id")] = normalized.id
             }
         }
         applyPeriodTimeScheme(timetableId, scheme)
@@ -152,8 +157,15 @@ class SettingsRepository(
             prefs[Keys.PERIOD_TIME_SCHEMES] = PeriodTimeScheme.encode(
                 PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES]).filterNot { it.id == id }
             )
+            val schemeKey = stringPreferencesKey("timetable_${targetId}_scheme_id")
+            if (prefs[schemeKey] == id) {
+                prefs[schemeKey] = PeriodTimeScheme.defaultId(targetId)
+            }
         }
         val table = timetableDao.byId(targetId) ?: return
+        if (table.periodSchemeId == id) {
+            timetableDao.upsert(table.copy(periodSchemeId = PeriodTimeScheme.defaultId(targetId)))
+        }
         val remaining = PeriodTimeScheme.decode(preferences.data.first()[Keys.PERIOD_TIME_SCHEMES])
         if (remaining.none { !it.isDefault } || removed?.matches(table.periods(), table.periodDurationMinutes) == true) {
             remaining.firstOrNull { it.id == PeriodTimeScheme.defaultId(targetId) }?.let { applyPeriodTimeScheme(targetId, it) }
@@ -175,8 +187,12 @@ class SettingsRepository(
         val timetable = requireNotNull(timetableDao.byId(timetableId)) { "课表不存在" }
         timetableDao.upsert(timetable.copy(
             periodsCsv = Timetable.serializePeriods(scheme.periods),
-            periodDurationMinutes = scheme.durationMinutes
+            periodDurationMinutes = scheme.durationMinutes,
+            periodSchemeId = scheme.id
         ))
+        preferences.edit { prefs ->
+            prefs[stringPreferencesKey("timetable_${timetableId}_scheme_id")] = scheme.id
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -194,6 +210,7 @@ class SettingsRepository(
             val minutes = java.time.Duration.between(first.start, first.end).toMinutes().toInt()
             if (minutes > 0) minutes else 45
         } else t.periodDurationMinutes
+        val activeSchemeKey = stringPreferencesKey("timetable_${t.id}_scheme_id")
         return AppSettings(
             timetableId = t.id,
             timetableName = t.name,
@@ -206,7 +223,8 @@ class SettingsRepository(
             themeMode = prefs[Keys.THEME_MODE] ?: AppSettings().themeMode,
             themeColor = prefs[Keys.THEME_COLOR] ?: AppSettings().themeColor,
             reminderEnabled = (prefs[Keys.REMINDER_ENABLED] ?: 0) == 1,
-            reminderMinutes = (prefs[Keys.REMINDER_MINUTES] ?: 15).coerceIn(5, 60)
+            reminderMinutes = (prefs[Keys.REMINDER_MINUTES] ?: 15).coerceIn(5, 60),
+            activePeriodSchemeId = t.periodSchemeId ?: prefs[activeSchemeKey]
         )
     }
 
@@ -245,7 +263,8 @@ class SettingsRepository(
                     semesterStartEpochDay = semesterStart?.toEpochDay() ?: current.semesterStartEpochDay,
                     totalWeeks = totalWeeks ?: current.totalWeeks,
                     periodsCsv = periods?.let { Timetable.serializePeriods(it) } ?: current.periodsCsv,
-                    periodDurationMinutes = periodDurationMinutes ?: current.periodDurationMinutes
+                    periodDurationMinutes = periodDurationMinutes ?: current.periodDurationMinutes,
+                    periodSchemeId = if (periods != null || periodDurationMinutes != null) null else current.periodSchemeId
                 )
             )
         }

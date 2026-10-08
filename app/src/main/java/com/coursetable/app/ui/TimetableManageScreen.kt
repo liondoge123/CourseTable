@@ -213,7 +213,7 @@ private fun NameDialog(
     var name by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(title, Modifier.testTag("name-dialog-title")) },
         text = {
             OutlinedTextField(
                 value = name,
@@ -222,7 +222,7 @@ private fun NameDialog(
                 label = { Text("课表名称") },
                 showUnfocusedBorder = false,
                 containerAlpha = 0.55f,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("timetable-name-input")
             )
         },
         confirmButton = {

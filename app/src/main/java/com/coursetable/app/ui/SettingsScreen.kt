@@ -694,6 +694,7 @@ fun SettingsScreen(
             schemes = timeSchemes,
             periods = settings.periods,
             durationMinutes = settings.periodDurationMinutes,
+            currentSchemeId = settings.activePeriodSchemeId,
             onSave = { settingsRepo.savePeriodTimeScheme(it) },
             onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
             onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },

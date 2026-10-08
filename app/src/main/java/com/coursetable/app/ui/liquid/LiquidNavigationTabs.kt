@@ -798,32 +798,20 @@ fun LiquidMetaballNavigationDock(
 
         val glassEnabled = backdrop != null && capability != GlassCapability.STATIC
 
-        val bridgeBorderColor = if (colors.isDark) {
-            Color.White.copy(alpha = 0.50f)
-        } else {
-            Color.White.copy(alpha = 0.85f)
-        }
-        val bridgeBorderStroke = BorderStroke(1.2.dp, bridgeBorderColor)
-
         val bridgingModifier = if (isBridging) {
             if (glassEnabled) {
-                Modifier
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { metaballShape },
-                        effects = {
-                            vibrancy()
-                            blur(8.dp.toPx())
-                        },
-                        highlight = { Highlight.Default.copy(alpha = 0.60f) },
-                        shadow = { Shadow(radius = 10.dp, color = Color.Black.copy(alpha = if (colors.isDark) 0.28f else 0.12f)) },
-                        onDrawSurface = { drawRect(dockContainerColor) }
-                    )
-                    .border(bridgeBorderStroke, metaballShape)
+                Modifier.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { metaballShape },
+                    effects = {
+                        vibrancy()
+                        blur(8.dp.toPx())
+                    },
+                    shadow = { Shadow(radius = 10.dp, color = Color.Black.copy(alpha = if (colors.isDark) 0.28f else 0.12f)) },
+                    onDrawSurface = { drawRect(dockContainerColor) }
+                )
             } else {
-                Modifier
-                    .background(dockContainerColor, metaballShape)
-                    .border(bridgeBorderStroke, metaballShape)
+                Modifier.background(dockContainerColor, metaballShape)
             }
         } else {
             Modifier
@@ -833,8 +821,16 @@ fun LiquidMetaballNavigationDock(
             modifier = Modifier
                 .width(totalWidthDp)
                 .height(dockHeightDp)
-                .then(bridgingModifier)
         ) {
+            // 0. Bridging metaball surface (isolated so its drawBackdrop layer clip does not clip tabs or the moving lens)
+            if (isBridging) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .then(bridgingModifier)
+                )
+            }
+
             // 1. Navigation tabs (draws full refraction lens when detached or hidden; during bridging, surface is drawn by the metaball container)
             Box(
                 modifier = Modifier

@@ -101,6 +101,24 @@ fun Color.Companion.fromStoredLong(stored: Long): Color {
     return if ((argb ushr 24) and 0xFF == 0) CourseColorPalette[0] else Color(argb)
 }
 
+/**
+ * 为新建课程自动挑选尚未选用（或使用频率最低）的调色板颜色。
+ * 优先按不同课程名称统计颜色使用次数，保证同一课程多节次时不过度倾斜，
+ * 并按调色板默认顺序选取第一个未选用（或最少使用）的颜色。
+ */
+fun nextUnusedCourseColor(existingCourses: Collection<com.coursetable.app.data.Course>): Long {
+    val usedColors = existingCourses
+        .filter { it.name.isNotBlank() }
+        .distinctBy { it.name.trim() }
+        .ifEmpty { existingCourses }
+        .groupingBy { it.color }
+        .eachCount()
+
+    return CourseColorPalette
+        .minBy { paletteColor -> usedColors[paletteColor.toArgbLong()] ?: 0 }
+        .toArgbLong()
+}
+
 @Composable
 fun CourseTableTheme(
     themeMode: ThemeMode = ThemeMode.AUTO,

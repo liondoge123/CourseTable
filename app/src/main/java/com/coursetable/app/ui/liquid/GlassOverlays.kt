@@ -373,10 +373,14 @@ fun AlertDialog(
             onBack = { dismissAnimated() }
         )
         CompositionLocalProvider(LocalDialogDismissController provides dismissController) {
-            Box(
-                Modifier.fillMaxSize().then(if (fixedEditorFrame || pageTransitionKey != null) Modifier else Modifier.imePadding()),
-                contentAlignment = Alignment.Center
-            ) {
+            EndInputOnOutsideTap { endInputModifier ->
+                Box(
+                    Modifier
+                        .then(endInputModifier)
+                        .fillMaxSize()
+                        .then(if (fixedEditorFrame || pageTransitionKey != null) Modifier else Modifier.imePadding()),
+                    contentAlignment = Alignment.Center
+                ) {
                 AnimatedVisibility(
                     visibleState = scrimVisibility,
                     modifier = Modifier.predictiveBackScrim(back),
@@ -423,6 +427,7 @@ fun AlertDialog(
             }
         }
     }
+}
 }
 
 private data class DialogPagePresentation(
@@ -536,7 +541,7 @@ private fun DialogPageSurface(page: DialogPagePresentation) {
                         onClick = {}
                     ),
                 shape = RoundedRectangle(32.dp),
-                shadowElevation = 0.dp,
+                shadowElevation = 20.dp,
                 style = OverlayGlassStyle.DIALOG,
                 // Large editing frames retain frosted glass without the extra
                 // full-surface lens pass during keyboard/layout updates.
@@ -607,7 +612,7 @@ internal fun GlassProgressDialog(
                     .fillMaxWidth()
                     .then(modifier),
                 shape = RoundedRectangle(28.dp),
-                shadowElevation = 0.dp,
+                shadowElevation = 20.dp,
                 style = OverlayGlassStyle.DIALOG
             ) {
                 Row(
@@ -949,7 +954,7 @@ fun NumberWheelPickerDialog(
                                 onClick = {}
                             ),
                         shape = RoundedRectangle(32.dp),
-                        shadowElevation = 0.dp,
+                        shadowElevation = 20.dp,
                         style = OverlayGlassStyle.DIALOG
                     ) {
                         Column {
@@ -1111,7 +1116,7 @@ internal fun DropdownMenu(
                                     onClick = {}
                                 ),
                             shape = RoundedRectangle(24.dp),
-                            shadowElevation = 0.dp,
+                            shadowElevation = 16.dp,
                             style = OverlayGlassStyle.MENU
                         ) {
                             Column(

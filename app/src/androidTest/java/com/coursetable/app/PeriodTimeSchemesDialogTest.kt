@@ -40,18 +40,20 @@ class PeriodTimeSchemesDialogTest {
         compose.setContent {
             var schemes by remember { mutableStateOf(PeriodTimeScheme.withDefault(initial, PeriodTimeScheme.defaultFor(0, current, 45))) }
             var times by remember { mutableStateOf(current) }
+            var activeSchemeId by remember { mutableStateOf<String?>(null) }
             CourseTableTheme {
                 LiquidBackdropHost(Modifier.fillMaxSize()) {
                     PeriodTimeSchemesDialog(
                         schemes = schemes, periods = times, durationMinutes = 45,
+                        currentSchemeId = activeSchemeId,
                         onSave = { item ->
                             if (failSave) error("Disk unavailable")
                             saved = item
                             schemes = schemes.filterNot { it.id == item.id } + item
                         },
-                        onApply = { applied = it; times = it.periods },
-                        onSaveCurrent = { savedCurrent = it; times = it.periods; if (it.isDefault) schemes = schemes.filterNot { item -> item.id == it.id } + it },
-                        onDelete = { id -> schemes = schemes.filterNot { it.id == id } },
+                        onApply = { applied = it; times = it.periods; activeSchemeId = it.id },
+                        onSaveCurrent = { savedCurrent = it; times = it.periods; activeSchemeId = it.id; if (it.isDefault) schemes = schemes.filterNot { item -> item.id == it.id } + it },
+                        onDelete = { id -> schemes = schemes.filterNot { it.id == id }; if (activeSchemeId == id) activeSchemeId = null },
                         onDismiss = {}
                     )
                 }
@@ -134,11 +136,26 @@ class PeriodTimeSchemesDialogTest {
         compose.onNode(hasSetTextAction()).performTextReplacement("夏季作息")
         compose.onNodeWithText("保存").performClick()
         compose.onNodeWithText("夏季作息").assertIsDisplayed()
-        compose.onAllNodesWithText("已选用").assertCountEquals(2)
+        compose.onAllNodesWithText("已选用").assertCountEquals(1)
         compose.runOnIdle {
             assertEquals(current, saved?.periods)
             assertNotNull(saved)
             assertNull(applied)
+        }
+    }
+
+    @Test fun savedAsSchemeFromDefaultDoesNotDuplicateSelectedStateAndCanBeApplied() {
+        show(initial = emptyList())
+        compose.onNodeWithText("默认方案").performClick()
+        compose.onNodeWithText("另存为方案").performScrollTo().performClick()
+        compose.onNode(hasSetTextAction()).performTextReplacement("自建方案")
+        compose.onNodeWithText("保存").performClick()
+        compose.onNodeWithText("自建方案").assertIsDisplayed()
+        compose.onAllNodesWithText("已选用").assertCountEquals(1)
+        compose.onNodeWithText("选用").performClick()
+        compose.onAllNodesWithText("已选用").assertCountEquals(1)
+        compose.runOnIdle {
+            assertEquals("自建方案", applied?.name)
         }
     }
 

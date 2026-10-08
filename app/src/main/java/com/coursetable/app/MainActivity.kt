@@ -187,8 +187,6 @@ private fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
             ) {
                 AnimatedContent(
                     targetState = activeImport != null,
@@ -229,17 +227,24 @@ private fun MainScreen(
                             label = "RootTabTransition"
                         ) { dest ->
                             when (dest) {
-                                RootDestination.TIMETABLE -> TimetableScreen(vm, bottomContentPadding = FloatingDockInset)
-                                RootDestination.COURSES -> CourseManageScreen(
-                                    courses = courses,
-                                    totalWeeks = settings.totalWeeks,
-                                    periodCount = settings.periods.size.coerceAtLeast(1),
-                                    onBack = {},
-                                    onSave = vm::saveCourse,
-                                    onDelete = vm::deleteCourse,
-                                    rootMode = true,
-                                    bottomContentPadding = FloatingDockInset
-                                )
+                                // Page transitions and their scrims need the whole window.
+                                // These two root screens do not own a FullscreenPageContainer,
+                                // so apply their safe area here, inside the transition.
+                                RootDestination.TIMETABLE -> Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                                    TimetableScreen(vm, bottomContentPadding = FloatingDockInset)
+                                }
+                                RootDestination.COURSES -> Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                                    CourseManageScreen(
+                                        courses = courses,
+                                        totalWeeks = settings.totalWeeks,
+                                        periodCount = settings.periods.size.coerceAtLeast(1),
+                                        onBack = {},
+                                        onSave = vm::saveCourse,
+                                        onDelete = vm::deleteCourse,
+                                        rootMode = true,
+                                        bottomContentPadding = FloatingDockInset
+                                    )
+                                }
                                 RootDestination.IMPORT -> ImportScreen(
                                     onImported = { nestedPageOpen = false; destination = RootDestination.TIMETABLE },
                                     bottomContentPadding = FloatingDockInset,

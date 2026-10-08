@@ -36,6 +36,7 @@ import com.coursetable.app.ui.liquid.IconButton
 import com.coursetable.app.ui.liquid.Text
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 import com.coursetable.app.ui.theme.fromStoredLong
+import com.coursetable.app.ui.theme.nextUnusedCourseColor
 import kotlinx.coroutines.delay
 
 private val WEEKDAY_SHORT2 = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -82,7 +83,8 @@ fun CourseManageScreen(
                 IconButton(onClick = {
                     editingCourse = Course(
                         id = 0, name = "", dayOfWeek = 1, startSection = 1, duration = 2,
-                        startWeek = 1, endWeek = totalWeeks, weekType = 0, color = 0xFF0A84FF
+                        startWeek = 1, endWeek = totalWeeks, weekType = 0,
+                        color = nextUnusedCourseColor(courses)
                     )
                 }) {
                     Icon(Icons.Filled.Add, contentDescription = "添加课程")

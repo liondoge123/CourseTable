@@ -201,7 +201,6 @@ internal fun OverlayGlassSurface(
                     }
                 }
             )
-            .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     } else {
         modifier
             .shadow(shadowElevation, shape, clip = false)
@@ -211,7 +210,6 @@ internal fun OverlayGlassSurface(
                     listOf(fallbackSheen, fallbackTint, fallbackTint)
                 )
             )
-            .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     }
 
     CompositionLocalProvider(LocalContentColor provides contentColor) {
