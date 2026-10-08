@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.activity.BackEventCompat
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.graphics.toPixelMap
@@ -157,6 +158,9 @@ class RootNavigationTest {
         composeRule.onNodeWithText("Apache License 2.0").assertIsDisplayed()
         composeRule.onNodeWithText("免责与责任限制声明").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription("返回").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithTag("about-page").fetchSemanticsNodes().isEmpty()
+        }
         composeRule.onNodeWithText("课程安排、提醒、外观与数据").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("about-page").assertDoesNotExist()
     }
