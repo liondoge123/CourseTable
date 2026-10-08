@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.activity.BackEventCompat
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -143,16 +145,19 @@ class RootNavigationTest {
     @Test
     fun aboutSubpageDisplaysOpenSourceAndLicenseDetailsAndReturnsToSettings() {
         composeRule.onAllNodesWithText("设置")[0].performClick()
-        composeRule.onNodeWithText("关于 CourseTable").performScrollTo().performClick()
+        // Scroll-to only exposes the row at the viewport edge, where the floating
+        // dock can cover its touch center. Invoke the row action for this navigation test.
+        composeRule.onNodeWithText("关于 CourseTable").performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onNodeWithTag("about-page").isDisplayed()
         }
         composeRule.onNodeWithTag("about-page").assertIsDisplayed()
         composeRule.onNodeWithText("关于 CourseTable").assertIsDisplayed()
         composeRule.onNodeWithText("Apache License 2.0").assertIsDisplayed()
-        composeRule.onNodeWithText("免责与责任限制声明").assertIsDisplayed()
+        composeRule.onNodeWithText("免责与责任限制声明").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithContentDescription("返回").performClick()
-        composeRule.onNodeWithText("课程安排、提醒、外观与数据").assertIsDisplayed()
+        composeRule.onNodeWithText("课程安排、提醒、外观与数据").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("about-page").assertDoesNotExist()
     }
 }
