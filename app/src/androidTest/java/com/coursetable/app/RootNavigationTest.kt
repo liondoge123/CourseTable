@@ -5,6 +5,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.activity.BackEventCompat
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -141,7 +143,10 @@ class RootNavigationTest {
     @Test
     fun aboutSubpageDisplaysOpenSourceAndLicenseDetailsAndReturnsToSettings() {
         composeRule.onAllNodesWithText("设置")[0].performClick()
-        composeRule.onNodeWithText("关于 CourseTable").performClick()
+        composeRule.onNodeWithText("关于 CourseTable").performScrollTo().performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onNodeWithTag("about-page").isDisplayed()
+        }
         composeRule.onNodeWithTag("about-page").assertIsDisplayed()
         composeRule.onNodeWithText("关于 CourseTable").assertIsDisplayed()
         composeRule.onNodeWithText("Apache License 2.0").assertIsDisplayed()
