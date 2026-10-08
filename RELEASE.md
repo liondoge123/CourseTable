@@ -42,18 +42,20 @@ For the measured size baseline, lossless optimization plan, regression requireme
 
 ## Automated builds
 
-Use the project script for both preview packages and formal releases:
+Use the project script under PowerShell 7 (`pwsh`) for both preview packages and formal releases (automatically falls back to Windows PowerShell 5.1 if `pwsh` is not installed):
 
 ```powershell
 # Fast test package: increment the internal build number and build arm64 only.
-.\scripts\build-apk.ps1 preview
+pwsh .\scripts\build-apk.ps1 preview
 
 # Formal release: run the full validation and build every configured ABI.
-.\scripts\build-apk.ps1 release
+pwsh .\scripts\build-apk.ps1 release
 
 # Override the candidate semantic version when needed.
-.\scripts\build-apk.ps1 release -VersionName 1.6.0
+pwsh .\scripts\build-apk.ps1 release -VersionName 1.6.0
 ```
+
+From CMD or classic shell, you can also run `.\scripts\build-apk.cmd <preview|release>` directly (prioritizes `pwsh` 7 and falls back to `powershell` 5.1).
 
 Preview APKs use the same package name and signing certificate as formal releases, so
 they update the installed app. Their unique `preview-b{versionCode}` filename avoids

@@ -3,7 +3,7 @@
 ## Release packaging
 
 - Follow the versioning and artifact rules in `RELEASE.md` whenever creating a release build.
-- Use `scripts/build-apk.ps1 preview` for installable test packages and `scripts/build-apk.ps1 release` for formal releases.
+- Use `pwsh scripts/build-apk.ps1 preview` for installable test packages and `pwsh scripts/build-apk.ps1 release` for formal releases (fallback to `powershell` if `pwsh` is unavailable).
 - Increment both `versionCode` and the appropriate semantic component of `versionName` for a published release.
 - Name APK artifacts `CourseTable-v{versionName}-{ABI}-{buildType}.apk`.
 - Do not use ambiguous suffixes such as `ui` in release artifact names.

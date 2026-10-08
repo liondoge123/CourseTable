@@ -11,6 +11,35 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
+    if (-not $pwshCommand) {
+        $candidatePaths = @(
+            'D:\PowerShell7\7\pwsh.exe',
+            "$env:ProgramFiles\PowerShell\7\pwsh.exe",
+            "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe",
+            "$env:LOCALAPPDATA\Microsoft\powershell\pwsh.exe"
+        )
+        foreach ($candidate in $candidatePaths) {
+            if (Test-Path -LiteralPath $candidate) {
+                $pwshCommand = [pscustomobject]@{ Source = $candidate }
+                break
+            }
+        }
+    }
+    if ($pwshCommand) {
+        Write-Host "Detected Windows PowerShell $($PSVersionTable.PSVersion). Relaunching build under PowerShell 7 ($($pwshCommand.Source))..."
+        $forwardArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, $Mode)
+        if ($VersionName) { $forwardArgs += @('-VersionName', $VersionName) }
+        if ($DryRun) { $forwardArgs += '-DryRun' }
+        & $pwshCommand.Source @forwardArgs
+        exit $LASTEXITCODE
+    } else {
+        Write-Warning "PowerShell 7 (pwsh) not found. Falling back to Windows PowerShell $($PSVersionTable.PSVersion)..."
+    }
+}
+
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $versionFile = Join-Path $repoRoot 'version.properties'
 $gradleFile = Join-Path $repoRoot 'gradlew.bat'
@@ -123,6 +152,7 @@ if ($Mode -eq 'release' -and ([version]$nextName -le [version]$lastRelease)) {
 
 $displayName = if ($Mode -eq 'preview') { "$nextName-preview" } else { $nextName }
 Write-Host "Planned build: $displayName (versionCode $nextCode)"
+Write-Host "PowerShell runtime: PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
 Configure-Java
 if ($DryRun) { return }
 
