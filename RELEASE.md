@@ -2,6 +2,8 @@
 
 CourseTable releases follow semantic versioning and use GitHub-friendly artifact names.
 
+Public release notes describe user-facing changes and installation instructions. Do not include a validation section or internal test, lint, device-testing, or build-verification details.
+
 ## Versioning
 
 - Git tag: `v{versionName}`
