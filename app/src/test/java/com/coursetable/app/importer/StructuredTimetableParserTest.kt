@@ -1,4 +1,5 @@
 package com.coursetable.app.importer
+import com.coursetable.app.data.scheduledWeeks
 
 import com.coursetable.app.data.AppSettings
 import org.junit.Assert.*
@@ -8,7 +9,17 @@ class StructuredTimetableParserTest {
     private val settings = AppSettings(totalWeeks = 18)
     private fun token(x: Float, top: Float, text: String) = TextToken(x - 25, 1025 - top - 18, x + 25, 1025 - top, text)
     private val headers = listOf(token(80f, 85f, "选课编号"), token(210f, 85f, "课程代码"), token(390f, 85f, "课程名称"), token(540f, 85f, "班号"), token(640f, 85f, "开课学院"), token(735f, 85f, "任课教师"), token(835f, 85f, "学分"), token(935f, 85f, "性质"), token(1120f, 85f, "上课时间地点"))
-    @Test fun screenshotTranscriptionProducesFourteenRecords() {
+    @Test fun repeatedTableHeadersDoNotBecomeCoursesAndRegionsStayUnique() {
+        val page = headers + token(390f, 28f, "本学期周课表") + token(390f, 150f, "数学") + token(1120f, 140f, "1-17周 星期一 1-2节")
+        val stitched = (0..2).flatMap { index -> page.map { it.copy(y0 = it.y0 + index * 1025, y1 = it.y1 + index * 1025) } }
+        val edges = (0..2).flatMap { index -> listOf(1025 - 114f + index * 1025, 1025 - 183f + index * 1025) }
+        val result = StructuredTimetableParser.extract(stitched, 1280f, 3075f, settings, rowEdges = edges)
+        assertEquals(3, result.candidates.size)
+        assertTrue(result.candidates.all { it.name == "数学" && it.dayOfWeek == 1 })
+        assertEquals(3, result.regions.map { it.id }.distinct().size)
+        assertEquals(1, deduplicateOcrCandidates(result.candidates).size)
+    }
+    @Test fun screenshotTranscriptionProducesTwelveMeetingsWithSparseWeeks() {
         // Transcribed text/geometry from the supplied image; this tests structure independently of OCR accuracy.
         val names = listOf("自动控制原理B", "高电压与绝缘技术", "体育健康课程Ⅰ", "模拟集成电路设计", "嵌入式系统设计", "电力电子技术（含实", "专业应用创新实践Ⅱ", "功率半导体器件原理", "EDA技术", "形势与政策Ⅴ", "中国古代史")
         val edgesTop = listOf(114f, 183f, 252f, 321f, 390f, 460f, 583f, 708f, 777f, 847f, 916f, 986f)
@@ -25,10 +36,10 @@ class StructuredTimetableParserTest {
             }
         }
         val result = StructuredTimetableParser.extract(headers + body, 1280f, 1025f, settings, rowEdges = edgesTop.map { 1025 - it })
-        assertEquals(14, result.candidates.size)
+        assertEquals(12, result.candidates.size)
         assertEquals(11, result.candidates.map { it.name }.distinct().size)
         assertEquals(2, result.candidates.count { it.name.startsWith("电力电子技术") })
-        assertEquals(listOf(4 to 4, 9 to 10, 14 to 16), result.candidates.filter { it.name == "中国古代史" }.map { it.startWeek to it.endWeek })
+        assertEquals(listOf(4,9,10,14,15,16), result.candidates.single { it.name == "中国古代史" }.asCourse().scheduledWeeks())
         assertTrue(result.candidates.none { it.needsReview })
         assertEquals(11, result.regions.size)
     }
@@ -60,7 +71,9 @@ class StructuredTimetableParserTest {
     @Test fun acrossPagesPreservesGapsLocationsDurationAndParity() {
         val a = CandidateCourse("数学", "A301", "张三", 1, 1, 2, 1, 4, 0)
         val list = listOf(a, a.copy(startWeek = 9, endWeek = 10), a.copy(location = "B301"), a.copy(duration = 3), a.copy(weekType = 1))
-        assertEquals(5, ImageTimetableOcr.mergeAcrossPages(list).size)
+        val merged = ImageTimetableOcr.mergeAcrossPages(list)
+        assertEquals(4, merged.size)
+        assertEquals(listOf(1, 2, 3, 4, 9, 10), merged.first { it.location == "A301" && it.duration == 2 && it.weekType == 0 }.asCourse().scheduledWeeks())
         assertEquals(1, ImageTimetableOcr.mergeAcrossPages(listOf(a, a.copy(startWeek = 5, endWeek = 8))).size)
     }
     @Test fun continuationRowsAbovePreviousHeaderAreNotDropped() {

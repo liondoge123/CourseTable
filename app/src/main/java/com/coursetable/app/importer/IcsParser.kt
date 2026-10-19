@@ -99,12 +99,14 @@ object IcsParser {
                     val parsedEnd = parseDt(endProp?.value, endProp?.params?.get("TZID"))
 
                     if (parsedStart == null) {
-                        warnings.add("跳过无开始时间的日程：${props["SUMMARY"]?.firstOrNull()?.value.orEmpty()}")
+                        warnings.add("事件 ${out.size + 1} 开始时间无效，请校对：${props["SUMMARY"]?.firstOrNull()?.value.orEmpty()}")
+                        out.add(IcsEvent(summary = props["SUMMARY"]?.firstOrNull()?.value.orEmpty(), location = props["LOCATION"]?.firstOrNull()?.value.orEmpty()))
                         continue
                     }
                     val allDay = parsedStart.time == null
                     if (allDay) {
-                        warnings.add("跳过全天日程（无具体上课时间）：${props["SUMMARY"]?.firstOrNull()?.value.orEmpty()}")
+                        warnings.add("事件 ${out.size + 1} 是全天日程，请补充上课时间：${props["SUMMARY"]?.firstOrNull()?.value.orEmpty()}")
+                        out.add(IcsEvent(summary = props["SUMMARY"]?.firstOrNull()?.value.orEmpty(), location = props["LOCATION"]?.firstOrNull()?.value.orEmpty(), date = parsedStart.date, isAllDay = true))
                         continue
                     }
 
@@ -122,7 +124,7 @@ object IcsParser {
                         startTime = parsedStart.time,
                         endTime = parsedEnd?.time,
                         rrule = props["RRULE"]?.firstOrNull()?.value,
-                        exdates = splitExdates(props["EXDATE"]?.firstOrNull()?.value),
+                        exdates = props["EXDATE"].orEmpty().flatMap { splitExdates(it.value) },
                         isAllDay = allDay
                     )
                     out.add(event)

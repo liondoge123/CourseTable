@@ -10,7 +10,7 @@ class CandidateValidationTest {
         assertTrue(valid.reviewIssues(AppSettings()).isEmpty())
         assertEquals(listOf("请对照原图核对课程信息"), valid.copy(needsReview = true).reviewIssues(AppSettings()))
         val issues = valid.copy(name = "", dayOfWeek = 0, duration = 0, startWeek = 19, weekType = 4).reviewIssues(AppSettings())
-        assertEquals(5, issues.size)
+        assertTrue(issues.containsAll(listOf("请确认星期", "请确认节次", "请确认周次范围", "请确认单双周")))
         assertTrue(issues.contains("请补齐课程名称"))
         assertTrue(valid.copy(startSection = Int.MAX_VALUE).reviewIssues(AppSettings()).contains("请确认节次"))
     }

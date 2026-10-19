@@ -1,4 +1,5 @@
 package com.coursetable.app.importer
+import com.coursetable.app.data.scheduledWeeks
 
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
@@ -117,13 +118,9 @@ class IcsExporterTest {
         """.trimIndent()
         val parsed = IcsParser.parse(ics)
         val outcome = IcsImporter.convert(parsed.events, settings)
-        // 2026-09-30 在第 5 周，应拆成 1-4 和 6-16 两段
-        assertEquals(2, outcome.courses.size)
-        val sorted = outcome.courses.sortedBy { it.startWeek }
-        assertEquals(1, sorted[0].startWeek)
-        assertEquals(4, sorted[0].endWeek)
-        assertEquals(6, sorted[1].startWeek)
-        assertEquals(16, sorted[1].endWeek)
-        assertEquals(3, sorted[0].dayOfWeek)
+        assertEquals(1, outcome.courses.size)
+        val course = outcome.courses.single()
+        assertEquals((1..16).filter { it != 5 }, course.scheduledWeeks())
+        assertEquals(3, course.dayOfWeek)
     }
 }

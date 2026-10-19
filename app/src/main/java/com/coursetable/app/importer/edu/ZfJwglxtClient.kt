@@ -22,12 +22,13 @@ object ZfJwglxtClient {
         xnm: String? = null,
         xqm: String? = null
     ): String {
+        val semester = EduImportFailure.requireSemester(xnm, xqm)
         val base = config.baseUrl.trimEnd('/') + if (config.contextPath.isEmpty()) "" else config.contextPath
         val url = buildString {
             append(base)
             append("/kbcx/xskbcx_cxXsgrkb.html?gnmkdm=N2151")
-            if (!xnm.isNullOrBlank()) append("&xnm=").append(xnm)
-            if (!xqm.isNullOrBlank()) append("&xqm=").append(xqm)
+            append("&xnm=").append(semester.xnm)
+            append("&xqm=").append(semester.xqm)
         }
         val request = Request.Builder()
             .url(url)
@@ -40,10 +41,7 @@ object ZfJwglxtClient {
         return withContext(Dispatchers.IO) {
             client.newCall(request).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    throw IllegalStateException("教务接口返回 ${resp.code}：$body")
-                }
-                body
+                EduImportFailure.validateResponse(resp.code, body)
             }
         }
     }

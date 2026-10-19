@@ -375,14 +375,6 @@ class TimetableRepository(
 
     /** 从备份导入一组课表，返回新建课表 id 列表 */
     suspend fun importTimetables(items: List<Pair<Timetable, List<Course>>>): List<Long> {
-        val ids = mutableListOf<Long>()
-        for ((timetable, courses) in items) {
-            val newId = timetableDao.upsert(timetable.copy(id = 0))
-            for (c in courses) {
-                courseDao.upsert(c.copy(id = 0, timetableId = newId))
-            }
-            ids.add(newId)
-        }
-        return ids
+        return courseDao.restoreTimetables(items)
     }
 }

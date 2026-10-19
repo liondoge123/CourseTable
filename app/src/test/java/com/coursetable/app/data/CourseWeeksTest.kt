@@ -50,10 +50,7 @@ class CourseWeeksTest {
         val backup = BackupManager.export(listOf(TimetableBackup(table, listOf(custom))))
         val restored = BackupManager.parse(backup).timetables.single().courses.single()
         assertEquals(listOf(1, 4, 8), restored.scheduledWeeks())
-        val legacy = JSONObject(BackupManager.export(listOf(TimetableBackup(table, listOf(course)))))
-        legacy.put("version", 2)
-        legacy.getJSONArray("timetables").getJSONObject(0).getJSONArray("courses")
-            .getJSONObject(0).remove("selectedWeeksCsv")
+        val legacy = JSONObject("""{"app":"CourseTable","version":2,"timetables":[{"name":"旧课表","semesterStart":"2026-09-01","courses":[{"name":"数学","dayOfWeek":1,"startSection":1,"duration":2,"startWeek":1,"endWeek":18,"weekType":0}]}]}""")
         assertEquals(course.scheduledWeeks(), BackupManager.parse(legacy.toString()).timetables.single().courses.single().scheduledWeeks())
     }
 }

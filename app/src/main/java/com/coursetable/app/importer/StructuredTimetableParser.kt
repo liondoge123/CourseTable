@@ -1,6 +1,7 @@
 package com.coursetable.app.importer
 
 import com.coursetable.app.data.AppSettings
+import com.coursetable.app.data.withScheduledWeeks
 import java.time.LocalTime
 import kotlin.math.abs
 
@@ -21,7 +22,7 @@ object StructuredTimetableParser {
         val s = normalize(text)
         val specifications = Regex("([\\d\\s,、.-]+)周").findAll(s).map { it.groupValues[1] }.toList()
         if (specifications.isEmpty()) return listOf(Triple(1, total, 0))
-        val type = if (s.contains("单")) 1 else if (s.contains("双")) 2 else 0
+        val type = when { Regex("单周|周\\s*[（(]\\s*单\\s*[）)]").containsMatchIn(s) -> 1; Regex("双周|周\\s*[（(]\\s*双\\s*[）)]").containsMatchIn(s) -> 2; else -> 0 }
         return specifications.flatMap { it.split(Regex("[,、.]")) }.mapNotNull { part ->
             val m = Regex("^\\s*(\\d{1,2})(?:\\s*-\\s*(\\d{1,2}))?\\s*$").matchEntire(part) ?: return@mapNotNull null
             val a = m.groupValues[1].toInt(); val b = m.groupValues[2].toIntOrNull() ?: a
@@ -58,19 +59,77 @@ object StructuredTimetableParser {
         }
         return bands.map { b -> b.sortedBy { it.x0 }.joinToString(" ") { it.text } }
     }
-    fun extract(tokens: List<TextToken>, width: Float, height: Float, settings: AppSettings, page: Int = 0, inherited: List<TextToken> = emptyList(), rowEdges: List<Float> = emptyList(), visualCells: List<ImportRegion> = emptyList()): PdfParseResult {
+    fun extract(tokens: List<TextToken>, width: Float, height: Float, settings: AppSettings, page: Int = 0, inherited: List<TextToken> = emptyList(), rowEdges: List<Float> = emptyList(), visualCells: List<ImportRegion> = emptyList(), knownTeachers: List<String> = emptyList()): PdfParseResult {
         val clean = tokens.filter { it.text.isNotBlank() }
-        val headers = clean.filter { normalize(it.text).replace(" ", "").let { s -> s == "课程名称" || s == "课程名" } }
-        val nameHeader = headers.firstOrNull() ?: inherited.firstOrNull { it.text.contains("课程名称") }
-        val timeHeader = (clean + inherited).firstOrNull { it.text.replace(" ", "").let { s -> s.contains("上课时间") || s.contains("时间地点") } }
-        return if (nameHeader != null && timeHeader != null) details(clean, nameHeader, timeHeader, if (headers.isEmpty()) inherited else clean, width, height, settings, page, rowEdges, headers.isEmpty())
-        else {
-            val hasWeekdays = clean.any { day.matches(normalize(it.text).trim()) }
-            val continuedHeaders = if (!hasWeekdays) inherited.filter { day.matches(normalize(it.text).trim()) }.map { it.copy(y0 = height + 5, y1 = height + 20) } else emptyList()
-            weekly(clean + continuedHeaders, width, height, settings, page, visualCells)
+        val headers = clean.filter { TimetableHeaders.matches(it.text, TimetableHeaders.Field.NAME) }
+        val nameHeader = headers.firstOrNull() ?: inherited.firstOrNull { TimetableHeaders.matches(it.text, TimetableHeaders.Field.NAME) }
+        val headerSource = if (headers.isEmpty()) inherited else clean
+        val timeHeader = nameHeader?.let { name -> headerSource.firstOrNull { it != name && abs(it.cy - name.cy) < name.height * 1.5 && TimetableHeaders.matches(it.text, TimetableHeaders.Field.TIME) } }
+        val hasWeekdays = clean.any { day.matches(normalize(it.text).trim()) }
+        val continuedHeaders = if (!hasWeekdays) inherited.filter { day.matches(normalize(it.text).trim()) }.map { it.copy(y0 = height + 5, y1 = height + 20) } else emptyList()
+        val weeklyTokens = clean + continuedHeaders
+        val routes = mutableListOf<Pair<TimetableRoute, () -> PdfParseResult>>()
+        LabeledTimetableParser.extract(tokens, width, height, settings, page, inherited, knownTeachers)?.let { labeled ->
+            routes += TimetableRoute.LABELED to { labeled }
         }
+        if (nameHeader != null && timeHeader != null) routes += TimetableRoute.DETAILS to {
+            val tableHeaders = headers.filter { kotlin.math.abs(it.cx - nameHeader.cx) < nameHeader.height * 3 }
+                .filter { n -> clean.any { abs(it.cy - n.cy) < n.height * 1.5 && TimetableHeaders.matches(it.text, TimetableHeaders.Field.TIME) } }
+                .sortedByDescending { it.cy }
+            if (tableHeaders.size <= 1) details(clean, nameHeader, timeHeader, headerSource, width, height, settings, page, rowEdges, headers.isEmpty())
+            else {
+                // Repeated table headers delimit screenshots/pages stitched into one image.
+                val topMargin = height - tableHeaders.first().y1
+                val pieces = tableHeaders.mapIndexed { index, n ->
+                    val lower = tableHeaders.getOrNull(index + 1)?.let { it.y1 + topMargin } ?: 0f
+                    val upper = if (index == 0) height else n.y1 + topMargin
+                    val slice = clean.filter { it.cy in lower..upper }
+                    val t = slice.first { abs(it.cy - n.cy) < n.height * 1.5 && TimetableHeaders.matches(it.text, TimetableHeaders.Field.TIME) }
+                    details(slice, n, t, slice, width, height, settings, page, rowEdges.filter { it in lower..upper } + lower, false, "$page-details-table$index")
+                }
+                PdfParseResult(pieces.flatMap { it.candidates }, pieces.flatMap { it.warnings }.distinct(), pieces.flatMap { it.regions })
+            }
+        }
+        routes += TimetableRoute.WEEKLY to { weekly(weeklyTokens, width, height, settings, page, visualCells) }
+        if (visualCells.isNotEmpty()) routes += TimetableRoute.COORDINATE to { weekly(weeklyTokens, width, height, settings, page, emptyList()) }
+        val expected = clean.count { Regex("\\d.*周").containsMatchIn(normalize(it.text)) }
+        val attempts = mutableListOf<RouteAttempt>()
+        var selected: PdfParseResult? = null
+        var best: RouteAttempt? = null
+        for ((route, parse) in routes) {
+            val result = enrich(parse(), clean, width, height)
+            val assessment = TimetableConfidence.assess(route, result, settings, expected)
+            attempts += assessment
+            val current = best
+            // A retry must improve confidence without discarding already valid meetings.
+            if (current == null || assessment.confidence > current.confidence + .05f && assessment.valid >= current.valid) {
+                selected = result; best = assessment
+            }
+            if (best!!.confidence >= TimetableConfidence.RETRY_THRESHOLD) break
+        }
+        val result = selected!!
+        val warnings = result.warnings + if (best!!.confidence < TimetableConfidence.RETRY_THRESHOLD) listOf("课表结构或字段识别存疑，请逐项校对；也可使用粘贴导入") else emptyList()
+        return result.copy(warnings = warnings.distinct(), routing = TimetableRouting(best!!.route, attempts))
     }
-    private fun details(tokens: List<TextToken>, nameH: TextToken, timeH: TextToken, headers: List<TextToken>, w: Float, h: Float, settings: AppSettings, page: Int, rowEdges: List<Float>, continuation: Boolean): PdfParseResult {
+    private fun enrich(result: PdfParseResult, clean: List<TextToken>, width: Float, height: Float): PdfParseResult {
+        return result.copy(candidates = result.candidates.map { candidate ->
+            val region = result.regions.firstOrNull { it.id == candidate.sourceRegion }
+            val local = if (region == null) emptyList() else clean.filter { it.cx / width in region.left..region.right && (height - it.cy) / height in region.top..region.bottom }
+            val missingWeeks = candidate.rawLines.none { Regex("\\d.*周").containsMatchIn(normalize(it)) }
+            val raw = normalize(candidate.rawLines.joinToString(" "))
+            val claimedDay = dayNumber(raw)
+            val contradiction = region?.layout == TimetableLayout.WEEKLY && claimedDay != null && claimedDay != candidate.dayOfWeek
+            val alternatives = local.flatMap { it.alternatives }.distinct()
+            val fields = candidate.pendingReviewFields() + alternatives.pendingReviewFields() +
+                (if (missingWeeks) setOf(ReviewField.WEEKS) else emptySet()) +
+                (if (contradiction) setOf(ReviewField.DAY_OF_WEEK) else emptySet())
+            candidate.copy(startWeek = if(missingWeeks) 0 else candidate.startWeek, endWeek = if(missingWeeks) 0 else candidate.endWeek,
+                reviewFields = fields,
+                needsReview = candidate.needsReview || missingWeeks || contradiction || alternatives.isNotEmpty(), alternatives = (candidate.alternatives + alternatives).distinct(),
+                issues = (candidate.issues + alternatives.map { it.reason } + (if(missingWeeks) listOf("周次缺失，请选择实际上课周次") else emptyList<String>()) + (if(contradiction) listOf("星期文字与表格位置不一致") else emptyList<String>())).distinct())
+        })
+    }
+    private fun details(tokens: List<TextToken>, nameH: TextToken, timeH: TextToken, headers: List<TextToken>, w: Float, h: Float, settings: AppSettings, page: Int, rowEdges: List<Float>, continuation: Boolean, prefix: String = "$page-details"): PdfParseResult {
         val headerY = nameH.cy
         val headerRow = headers.filter { abs(it.cy - headerY) < nameH.height * 1.5 }.sortedBy { it.cx }
         fun column(header: TextToken): Pair<Float, Float> {
@@ -79,8 +138,9 @@ object StructuredTimetableParser {
                 (headerRow.getOrNull(i + 1)?.let { (it.cx + header.cx) / 2 } ?: w)
         }
         val nr = column(nameH); val tr = column(timeH)
-        val teacherH = headerRow.firstOrNull { it.text.contains("教师") || it.text.contains("老师") }
+        val teacherH = headerRow.firstOrNull { TimetableHeaders.matches(it.text, TimetableHeaders.Field.TEACHER) }
         val teacherR = teacherH?.let { column(it) }
+        val locationR = headerRow.firstOrNull { TimetableHeaders.matches(it.text, TimetableHeaders.Field.LOCATION) }?.let { column(it) }
         val bodyTop = if (continuation) h else headerY - nameH.height
         val body = tokens.filter { it.cy < bodyTop }
         val nameTokens = body.filter { it.cx in nr.first..nr.second }
@@ -105,23 +165,35 @@ object StructuredTimetableParser {
                 ?: groups.getOrNull(index + 1)?.let { (group.minOf { t -> t.y0 } + it.maxOf { t -> t.y1 }) / 2 } ?: 0f
             // Prefer row metadata centers (course codes/credits) where available, and keep all time lines in the row.
             val row = body.filter { it.cy in lower..upper }
-            val id = "$page-details-$index"
+            val id = "$prefix-$index"
             regions.add(ImportRegion(id, page, 0f, (h - upper) / h, 1f, (h - lower) / h, TimetableLayout.DETAILS))
-            val name = lines(group).joinToString("").replace(" ", "").trim('|')
+            val name = lines(group).joinToString("").let { OcrDecisions.normalize(it) }.trim('|')
             val teacher = teacherR?.let { r -> lines(row.filter { it.cx in r.first..r.second }).joinToString("、") } ?: ""
             val timeLines = lines(row.filter { it.cx in tr.first..tr.second })
+            val rowFields = buildSet {
+                if (name.isBlank() || group.any { it.needsReview }) add(ReviewField.NAME)
+                if (teacherR != null && row.any { it.cx in teacherR.first..teacherR.second && it.needsReview }) add(ReviewField.TEACHER)
+                if (locationR != null && row.any { it.cx in locationR.first..locationR.second && it.needsReview }) add(ReviewField.LOCATION)
+                if (row.any { it.cx in tr.first..tr.second && it.needsReview }) add(ReviewField.TIME)
+                if (isEmpty() && row.any { it.needsReview }) add(ReviewField.GENERAL)
+            }
             val starts = timeLines.indices.filter { day.containsMatchIn(normalize(timeLines[it])) }
-            if (starts.isEmpty()) courses.add(CandidateCourse(name, teacher = teacher, dayOfWeek = 0, startSection = 0, duration = 1, startWeek = 1, endWeek = settings.totalWeeks, weekType = 0, sourceRegion = id, needsReview = true))
+            if (starts.isEmpty()) courses.add(CandidateCourse(name, teacher = teacher, dayOfWeek = 0, startSection = 0, duration = 1, startWeek = 1, endWeek = settings.totalWeeks, weekType = 0, sourceRegion = id, needsReview = true, reviewFields = rowFields + ReviewField.TIME))
             starts.forEachIndexed { i, start ->
                 val meeting = timeLines.subList(start, starts.getOrNull(i + 1) ?: timeLines.size)
                 val text = normalize(meeting.joinToString(" "))
                 val sec = sections(text, settings)
                 val timeEnd = section.find(normalize(meeting.first()))?.range?.last ?: clock.find(normalize(meeting.first()))?.range?.last
                 val inlineLocation = timeEnd?.let { normalize(meeting.first()).substring(it + 1).trim() }.orEmpty()
-                val location = (listOf(inlineLocation).filter { it.isNotBlank() } + meeting.drop(1)).joinToString(" ")
-                if (!Regex("\\d.*周").containsMatchIn(text)) warnings.add("$name 未标注周次，按当前学期处理")
+                val separateLocation = locationR?.let { r -> lines(row.filter { it.cx in r.first..r.second }).joinToString(" ") }.orEmpty()
+                val location = separateLocation.ifBlank { (listOf(inlineLocation).filter { it.isNotBlank() } + meeting.drop(1)).joinToString(" ") }
+                if (!Regex("\\d.*周").containsMatchIn(text)) warnings.add("$name 未标注周次，请校对")
                 val ranges = weeks(text, settings.totalWeeks)
-                for ((a, b, type) in ranges.ifEmpty { listOf(Triple(1, settings.totalWeeks, 0)) }) courses.add(CandidateCourse(name, location, teacher, dayNumber(text) ?: 0, sec?.first ?: 0, sec?.second ?: 1, a, b, type, meeting, id, name.isBlank() || sec == null || ranges.isEmpty() || text.contains("星斯") || row.any { it.needsReview }))
+                val fields = rowFields + (if (sec == null) setOf(ReviewField.SECTIONS) else emptySet()) +
+                    (if (ranges.isEmpty()) setOf(ReviewField.WEEKS) else emptySet()) +
+                    (if (text.contains("星斯")) setOf(ReviewField.DAY_OF_WEEK) else emptySet())
+                val base = CandidateCourse(name, location, teacher, dayNumber(text) ?: 0, sec?.first ?: 0, sec?.second ?: 1, 0, 0, 0, meeting, id, fields.isNotEmpty(), reviewFields = fields)
+                courses.add(withWeekRanges(base, ranges))
             }
         }
         return PdfParseResult(courses, warnings.distinct(), regions)
@@ -152,9 +224,15 @@ object StructuredTimetableParser {
             val covered = anchors.filter { it.first.cy in bottom..top }
             if (covered.isEmpty()) continue
             val id = "$page-block-$i"; val ls = lines(inside)
-            val parsed = PdfCellParser.parse(ls, dayNumber(col.text)!!, covered.first().second) ?: continue
-            val duration = if (section.containsMatchIn(normalize(ls.joinToString(" ")))) parsed.duration else covered.last().second - covered.first().second + 1
-            weeks(ls.joinToString(" "), settings.totalWeeks).forEach { (a, b, type) -> courses.add(parsed.copy(duration = duration, startWeek = a, endWeek = b, weekType = type, sourceRegion = id, needsReview = inside.any { it.needsReview })) }
+            val parsedRecords = PdfCellParser.parseMany(ls, dayNumber(col.text)!!, covered.first().second)
+            for (parsed in parsedRecords) {
+                val content = parsed.rawLines.joinToString(" ")
+                val duration = if (section.containsMatchIn(normalize(content))) parsed.duration else covered.last().second - covered.first().second + 1
+                val ambiguousSpan = parsedRecords.size > 1 && covered.size > 1 && !section.containsMatchIn(normalize(content))
+                courses.add(withWeekRanges(parsed.copy(duration = duration, sourceRegion = id,
+                    needsReview = parsed.needsReview || inside.any { it.needsReview } || ambiguousSpan,
+                    issues = parsed.issues + if (ambiguousSpan) listOf("同一色块含多个上课记录，节次跨度需确认") else emptyList()), weeks(content, settings.totalWeeks)))
+            }
             regions.add(cell.copy(id = id, page = page, layout = TimetableLayout.WEEKLY)); used.addAll(inside)
         }
         cols.forEachIndexed { ci, col ->
@@ -167,14 +245,22 @@ object StructuredTimetableParser {
                 if (cell.isEmpty()) return@forEachIndexed
                 val id = "$page-weekly-$ci-$ai"
                 val ls = lines(cell)
-                val parsed = PdfCellParser.parse(ls, dayNumber(col.text)!!, anchor.second) ?: return@forEachIndexed
-                val ranges = weeks(ls.joinToString(" "), settings.totalWeeks)
+                val parsedRecords = PdfCellParser.parseMany(ls, dayNumber(col.text)!!, anchor.second)
                 val labelDuration = sections(anchor.first.text, settings)?.second ?: 1
                 // Without a visual block/row edge, a text band cannot prove where a spanning course ends.
-                ranges.forEach { (a, b, type) -> courses.add(parsed.copy(duration = if (section.containsMatchIn(normalize(ls.joinToString(" ")))) parsed.duration else labelDuration, startWeek = a, endWeek = b, weekType = type, sourceRegion = id, needsReview = cell.any { it.needsReview } || !section.containsMatchIn(normalize(ls.joinToString(" "))) && labelDuration == 1)) }
+                for (parsed in parsedRecords) {
+                    val content = parsed.rawLines.joinToString(" ")
+                    courses.add(withWeekRanges(parsed.copy(duration = if (section.containsMatchIn(normalize(content))) parsed.duration else labelDuration, sourceRegion = id, needsReview = parsed.needsReview || cell.any { it.needsReview } || !section.containsMatchIn(normalize(content)) && labelDuration == 1), weeks(content, settings.totalWeeks)))
+                }
                 regions.add(ImportRegion(id, page, x0 / w, (h - y1) / h, x1 / w, (h - y0) / h, TimetableLayout.WEEKLY))
             }
         }
         return PdfParseResult(courses, if (courses.any { c -> c.rawLines.none { Regex("\\d.*周").containsMatchIn(it) } }) listOf("未标注周次的课程按当前学期处理，请校对") else emptyList(), regions)
+    }
+    private fun withWeekRanges(candidate: CandidateCourse, ranges: List<Triple<Int, Int, Int>>): CandidateCourse {
+        val weeks = ranges.flatMap { (a, b, type) -> (a..b).filter { type == 0 || it % 2 == type % 2 } }.distinct().sorted()
+        if (weeks.isEmpty()) return candidate.copy(startWeek = 0, endWeek = 0, needsReview = true)
+        val schedule = candidate.asCourse().withScheduledWeeks(weeks)
+        return candidate.copy(startWeek = schedule.startWeek, endWeek = schedule.endWeek, weekType = schedule.weekType, selectedWeeksCsv = schedule.selectedWeeksCsv)
     }
 }

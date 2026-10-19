@@ -77,7 +77,7 @@ object ImageImportPreparation {
         inverse.mapRect(crop)
         val rect = Rect(floor(crop.left).toInt().coerceIn(0, image.rawWidth - 1), floor(crop.top).toInt().coerceIn(0, image.rawHeight - 1), ceil(crop.right).toInt().coerceIn(1, image.rawWidth), ceil(crop.bottom).toInt().coerceIn(1, image.rawHeight))
         var sample = 1
-        while (maxOf(rect.width(), rect.height()) / sample > 4096) sample *= 2
+        while (maxOf(rect.width(), rect.height()) / sample > 16384 || rect.width().toLong() * rect.height() / sample / sample > ImportPolicy.MAX_RENDER_PIXELS) sample *= 2
         val decoder = BitmapRegionDecoder.newInstance(image.original.absolutePath, false)
         val decoded = try { decoder.decodeRegion(rect, BitmapFactory.Options().apply { inSampleSize = sample }) ?: error("图片无法裁剪") } finally { decoder.recycle() }
         return try {
@@ -86,11 +86,16 @@ object ImageImportPreparation {
     }
 
     suspend fun recognize(context: Context, image: PreparedImportImage, selection: ImageSelection, settings: com.coursetable.app.data.AppSettings): VisualImportSession {
+        return recognizeWithProgress(context, image, selection, settings) {}
+    }
+
+    suspend fun recognizeWithProgress(context: Context, image: PreparedImportImage, selection: ImageSelection, settings: com.coursetable.app.data.AppSettings, onProgress: (String) -> Unit): VisualImportSession {
+        onProgress("正在准备识别图片…")
         val cropped = decodeSelection(image, selection)
         val file = File(image.directory, "recognition.png")
         try { file.outputStream().use { cropped.compress(Bitmap.CompressFormat.PNG, 100, it) } } finally { cropped.recycle() }
         try {
-            val session = VisualTimetableImporter.open(context, Uri.fromFile(file), false, settings)
+            val session = VisualTimetableImporter.open(context, Uri.fromFile(file), false, settings, onProgress)
             return VisualImportSession(session.directory, session.pages, session.result, session.path, image, selection)
         } finally { file.delete() }
     }

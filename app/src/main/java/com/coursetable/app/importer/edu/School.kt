@@ -83,5 +83,11 @@ class UjsAdapter : SchoolAdapter {
 }
 
 val KNOWN_SCHOOLS: List<SchoolAdapter> = listOf(
-    UjsAdapter()
+    UjsAdapter(),
+    // Public login addresses from university notices; authenticated imports still need school-specific verification.
+    ZfJwglxtAdapter(ZfJwglxtConfig("zisu", "浙江外国语学院", "https://portaljw.zisu.edu.cn", "/jwglxt")),
+    ZfJwglxtAdapter(ZfJwglxtConfig("gxu", "广西大学", "https://jwxt2018.gxu.edu.cn", "/jwglxt")),
+    ZfJwglxtAdapter(ZfJwglxtConfig("yau", "延安大学", "https://jwglxt.yau.edu.cn", "/jwglxt")),
+    ZfJwglxtAdapter(ZfJwglxtConfig("zjhzu", "湖州学院", "https://zfjw.zjhzu.edu.cn", "/jwglxt")),
+    ZfJwglxtAdapter(ZfJwglxtConfig("jju", "九江学院", "https://zhjw1.jju.edu.cn", "/jwglxt"))
 )

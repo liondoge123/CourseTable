@@ -1,4 +1,5 @@
 package com.coursetable.app.importer
+import com.coursetable.app.data.scheduledWeeks
 
 import android.graphics.Bitmap
 import com.coursetable.app.data.WeekType
@@ -40,7 +41,7 @@ class OcrMergeTest {
         val merged = ImageTimetableOcr.mergeAcrossPages(listOf(a, b))
         assertEquals(1, merged.size)
         assertEquals(1, merged[0].startWeek)
-        assertEquals(16, merged[0].endWeek)
+        assertEquals((1..16).filter { it % 2 == 1 }, merged[0].asCourse().scheduledWeeks())
         assertEquals("A301", merged[0].location)
         assertEquals("王老师", merged[0].teacher)
     }

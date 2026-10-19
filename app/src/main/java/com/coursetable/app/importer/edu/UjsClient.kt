@@ -2,6 +2,7 @@ package com.coursetable.app.importer.edu
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -20,10 +21,16 @@ object UjsClient {
     private const val BASE = "http://jwxt.ujs.edu.cn"
 
     suspend fun fetchSchedule(cookies: String, xnm: String?, xqm: String?): String {
-        val year = xnm ?: "2025"
-        val semester = xqm ?: "12"
+        val requested = EduImportFailure.requireSemester(xnm, xqm)
+        val year = requested.xnm
+        val semester = requested.xqm
         // 先按正方新版 GET 抓取
-        runCatching { fetchGet(cookies, year, semester) }.getOrNull()?.let { return it }
+        try { return fetchGet(cookies, year, semester) }
+        catch (e: CancellationException) { throw e }
+        catch (e: EduImportException) {
+            if (e.kind == EduFailureKind.LOGIN_EXPIRED || e.kind == EduFailureKind.CREDENTIALS) throw e
+        }
+        catch (_: java.io.IOException) { /* Some deployments only expose the POST endpoint. */ }
         // GET 失败再按旧版 POST 兜底
         return fetchPost(cookies, year, semester)
     }
@@ -41,9 +48,7 @@ object UjsClient {
         return withContext(Dispatchers.IO) {
             client.newCall(request).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) throw IllegalStateException("教务接口返回 ${resp.code}")
-                if (!body.trimStart().startsWith("{")) throw IllegalStateException("非 JSON 响应")
-                body
+                EduImportFailure.validateResponse(resp.code, body)
             }
         }
     }
@@ -70,8 +75,7 @@ object UjsClient {
         return withContext(Dispatchers.IO) {
             client.newCall(request).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) throw IllegalStateException("教务接口返回 ${resp.code}：$body")
-                body
+                EduImportFailure.validateResponse(resp.code, body)
             }
         }
     }

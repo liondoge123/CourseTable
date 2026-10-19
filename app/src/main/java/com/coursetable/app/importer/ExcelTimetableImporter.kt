@@ -24,7 +24,7 @@ object ExcelTimetableImporter {
     private val DAY_RE = Regex("(星期|周)[一二三四五六日天]")
     private val SECTION_RE = Regex("第?\\s*(\\d{1,2})\\s*节?")
 
-    fun parseCsv(content: String): PdfParseResult {
+    fun parseCsv(content: String, strictLimits: Boolean = false): PdfParseResult {
         val warnings = mutableListOf<String>()
         val rows = splitCsv(content)
         if (rows.isEmpty()) return PdfParseResult(emptyList(), warnings + "CSV 文件为空")
@@ -50,31 +50,32 @@ object ExcelTimetableImporter {
         val candidates = mutableListOf<CandidateCourse>()
         for (i in (headerIdx + 1) until rows.size) {
             val row = rows[i]
+            if (strictLimits && listOf(colName, colTeacher, colLocation).any { it >= 0 && cellAt(row, it).trim().length > ImportPolicy.MAX_TEXT_FIELD }) {
+                throw ImportRejectedException("第 ${i + 1} 行文字字段超过 ${ImportPolicy.MAX_TEXT_FIELD} 字，请缩短后重试")
+            }
             val name = cellAt(row, colName).trim().take(ImportPolicy.MAX_TEXT_FIELD)
-            if (name.isEmpty()) continue
+            if (row.all { it.isBlank() }) continue
             val day = parseDay(cellAt(row, colDay))
             if (day == null) {
                 warnings.add("第 ${i + 1} 行星期无效：${cellAt(row, colDay)}")
-                continue
             }
             val startSection = cellAt(row, colStart).trim().toIntOrNull()
             val endSection = if (colEnd >= 0) cellAt(row, colEnd).trim().toIntOrNull() else startSection
             if (startSection == null) {
-                warnings.add("第 ${i + 1} 行开始节数无效，已跳过：$name")
-                continue
+                warnings.add("第 ${i + 1} 行开始节数无效，请校对：$name")
             }
-            val duration = ((endSection ?: startSection) - startSection + 1).coerceAtLeast(1)
+            val duration = if (startSection == null) 0 else (endSection ?: startSection) - startSection + 1
             val teacher = if (colTeacher >= 0) cellAt(row, colTeacher).trim().take(ImportPolicy.MAX_TEXT_FIELD) else ""
             val location = if (colLocation >= 0) cellAt(row, colLocation).trim().take(ImportPolicy.MAX_TEXT_FIELD) else ""
             val teacherClean = if (teacher == "无" || teacher.isEmpty()) "" else teacher
             val locationClean = if (location == "无" || location.isEmpty()) "" else location
             val weekSegments = parseWeekSegments(cellAt(row, colWeeks))
             if (weekSegments.isEmpty()) {
-                warnings.add("第 ${i + 1} 行周数无法解析，已跳过：$name")
-                continue
+                warnings.add("第 ${i + 1} 行周数无法解析，请校对：$name")
             }
-            for ((ws, we, wt) in weekSegments) {
+            for ((ws, we, wt) in weekSegments.ifEmpty { listOf(Triple(0, 0, 0)) }) {
                 if (candidates.size >= ImportPolicy.MAX_OUTPUT_COURSES) {
+                    if (strictLimits) throw ImportRejectedException("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 条，请分批导入")
                     warnings.add("课程数量超过 ${ImportPolicy.MAX_OUTPUT_COURSES} 门，已停止读取")
                     return PdfParseResult(candidates, warnings)
                 }
@@ -83,8 +84,8 @@ object ExcelTimetableImporter {
                         name = name,
                         location = locationClean,
                         teacher = teacherClean,
-                        dayOfWeek = day,
-                        startSection = startSection,
+                        dayOfWeek = day ?: 0,
+                        startSection = startSection ?: 0,
                         duration = duration,
                         startWeek = ws,
                         endWeek = we,

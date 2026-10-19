@@ -79,7 +79,7 @@ object PdfTextReader {
 /**
  * PDF/图片课表解析的文字块（统一使用 y 向上坐标系：cell 越靠上 y 值越大）
  */
-data class TextToken(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val text: String, val needsReview: Boolean = false) {
+data class TextToken(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val text: String, val needsReview: Boolean = false, val alternatives: List<OcrAlternative> = emptyList()) {
     val cx: Float get() = (x0 + x1) / 2f
     val cy: Float get() = (y0 + y1) / 2f
     val height: Float get() = (y1 - y0).coerceAtLeast(4f)
@@ -104,14 +104,25 @@ data class CandidateCourse(
     val sourceRegions: Set<String> = emptySet(),
     val sourceRecords: List<CandidateCourse> = emptyList(),
     val draftId: String? = null,
-    val selectedWeeksCsv: String = ""
+    val selectedWeeksCsv: String = "",
+    val issues: List<String> = emptyList(),
+    val alternatives: List<OcrAlternative> = emptyList(),
+    val included: Boolean? = null,
+    val targetCourseId: Long? = null,
+    val separateCourse: Boolean = false,
+    val updateDuplicate: Boolean = false,
+    val color: Long? = null,
+    val groupKey: String? = null,
+    val editedFields: Set<String> = emptySet(),
+    /** null preserves legacy/unclassified warnings; empty means no pending field checks. */
+    val reviewFields: Set<ReviewField>? = null
 ) {
     fun belongsTo(id: String?) = id != null && (sourceRegion == id || id in sourceRegions)
     fun excludingRegion(id: String): List<CandidateCourse> = if (!belongsTo(id)) listOf(this)
         else if (sourceRecords.isNotEmpty()) sourceRecords.flatMap { it.excludingRegion(id) } else emptyList()
 }
 
-data class PdfParseResult(val candidates: List<CandidateCourse>, val warnings: List<String>, val regions: List<ImportRegion> = emptyList())
+data class PdfParseResult(val candidates: List<CandidateCourse>, val warnings: List<String>, val regions: List<ImportRegion> = emptyList(), val routing: TimetableRouting? = null)
 
 /**
  * 网格重建（纯逻辑，便于单元测试）
@@ -372,6 +383,23 @@ object PdfGridExtractor {
  * 单元格文字解析
  */
 object PdfCellParser {
+    /** Split only after a completed schedule, preserving wrapped names and metadata. */
+    fun parseMany(lines: List<String>, dayOfWeek: Int, defaultSection: Int): List<CandidateCourse> {
+        val groups = mutableListOf<MutableList<String>>()
+        var group = mutableListOf<String>()
+        var scheduled = false
+        for (raw in lines) {
+            val line = raw.trim()
+            val isName = line.isNotBlank() && !Regex("\\d.*[周节]|星期|周[一二三四五六日]|\\d+:\\d+").containsMatchIn(line) &&
+                !isLocation(line) && !isTeacherLine(line) && !Regex("^(教师|任课|授课|地点|场地|教室)[:：]").containsMatchIn(line) &&
+                !NON_NAMING_RE.matches(line) && SKIP_WORDS.none { line.contains(it) }
+            if (scheduled && isName) { groups += group; group = mutableListOf(); scheduled = false }
+            group += line
+            if (Regex("\\d.*周|\\d.*节").containsMatchIn(line)) scheduled = true
+        }
+        if (group.isNotEmpty()) groups += group
+        return groups.mapNotNull { parse(it, dayOfWeek, defaultSection) }
+    }
 
     private val WEEK_RANGE_RE = Regex("(\\d{1,2})\\s*[-~～至]\\s*(\\d{1,2})\\s*周")
     private val WEEK_SINGLE_RE = Regex("(\\d{1,2})\\s*周")

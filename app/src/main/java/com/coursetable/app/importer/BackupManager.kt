@@ -14,7 +14,8 @@ import org.json.JSONObject
 /** 一个课表及其课程 */
 data class TimetableBackup(
     val timetable: Timetable,
-    val courses: List<Course>
+    val courses: List<Course>,
+    val preserveCourseGroups: Boolean = false
 )
 
 data class BackupData(
@@ -24,7 +25,7 @@ data class BackupData(
 
 object BackupManager {
 
-    const val FORMAT_VERSION = 3
+    const val FORMAT_VERSION = 4
 
     fun export(timetables: List<TimetableBackup>): String {
         val root = JSONObject()
@@ -55,9 +56,17 @@ object BackupManager {
                 o.put("weekType", c.weekType)
                 o.put("selectedWeeksCsv", c.selectedWeeksCsv)
                 o.put("color", c.color)
+                o.put("courseKey", c.courseId.takeIf { it > 0 }?.toString() ?: "record-${arr.length()}")
                 arr.put(o)
             }
-            t.put("courses", arr)
+            // Group relations are explicit; local database IDs are never restored verbatim.
+            val groups = JSONArray()
+            for ((key, sessions) in tb.courses.withIndex().groupBy { it.value.courseId.takeIf { id -> id > 0 }?.toString() ?: "record-${it.index}" }) {
+                val first = sessions.first().value
+                groups.put(JSONObject().put("key", key).put("name", first.name).put("teacher", first.teacher).put("color", first.color)
+                    .put("sessions", JSONArray(sessions.map { arr.getJSONObject(it.index) })))
+            }
+            t.put("courseGroups", groups)
             tables.put(t)
         }
         root.put("timetables", tables)
@@ -77,6 +86,7 @@ object BackupManager {
         if (root.optString("app").isNotEmpty() && root.optString("app") != "CourseTable") {
             return BackupData(emptyList(), warnings + "不是本应用的备份文件")
         }
+        if (root.optInt("version", 1) > FORMAT_VERSION) return BackupData(emptyList(), listOf("此备份版本较新，请升级应用"))
 
         // v2 格式：timetables 数组
         root.optJSONArray("timetables")?.let { arr ->
@@ -89,9 +99,23 @@ object BackupManager {
                 val o = arr.optJSONObject(i) ?: continue
                 val name = bounded(o.optString("name").ifBlank { "导入的课表" })
                 val timetable = parseTimetableMeta(o, name, warnings)
-                val courses = parseCourses(o.optJSONArray("courses"), warnings, remainingCourses)
+                val groups = o.optJSONArray("courseGroups")
+                val flat = if (groups == null) o.optJSONArray("courses") else JSONArray().apply {
+                    for (groupIndex in 0 until minOf(groups.length(), ImportPolicy.MAX_OUTPUT_COURSES)) {
+                        val group = groups.optJSONObject(groupIndex) ?: continue
+                        val sessions = group.optJSONArray("sessions") ?: continue
+                        for (sessionIndex in 0 until minOf(sessions.length(), remainingCourses)) {
+                            val session = sessions.optJSONObject(sessionIndex) ?: continue
+                            put(JSONObject(session.toString()).put("courseKey", "group-$groupIndex").put("name", group.optString("name"))
+                                .put("teacher", group.optString("teacher")).put("color", group.optLong("color", 0xFF0A84FF)))
+                            if (length() >= remainingCourses) break
+                        }
+                        if (length() >= remainingCourses) break
+                    }
+                }
+                val courses = parseCourses(flat, warnings, remainingCourses)
                 remainingCourses -= courses.size
-                result.add(TimetableBackup(timetable, courses))
+                result.add(TimetableBackup(timetable, courses, preserveCourseGroups = groups != null))
             }
             if (result.isEmpty()) warnings.add("备份中没有课表数据")
             return BackupData(result, warnings)
@@ -134,26 +158,26 @@ object BackupManager {
         for (i in 0 until minOf(arr.length(), limit)) {
             val o = arr.optJSONObject(i) ?: continue
             val name = bounded(o.optString("name").trim())
-            if (name.isEmpty()) {
-                warnings.add("跳过一条课程名称为空的记录")
-                continue
-            }
-            val startWeek = o.optInt("startWeek", 1).coerceIn(1, 60)
-            val endWeek = o.optInt("endWeek", startWeek).coerceIn(startWeek, 60)
+            if (name.isEmpty()) warnings.add("第 ${i + 1} 条课程名称为空，请校对")
+            val startWeek = o.optInt("startWeek", 0)
+            val endWeek = o.optInt("endWeek", 0)
             courses.add(
                 Course(
                     id = 0,
                     name = name,
                     teacher = bounded(o.optString("teacher")),
                     location = bounded(o.optString("location")),
-                    dayOfWeek = o.optInt("dayOfWeek", 1).coerceIn(1, 7),
-                    startSection = o.optInt("startSection", 1).coerceIn(1, 30),
-                    duration = o.optInt("duration", 1).coerceIn(1, 30),
+                    dayOfWeek = o.optInt("dayOfWeek", 0),
+                    startSection = o.optInt("startSection", 0),
+                    duration = o.optInt("duration", 0),
                     startWeek = startWeek,
                     endWeek = endWeek,
-                    weekType = o.optInt("weekType", 0).coerceIn(0, 2),
+                    weekType = o.optInt("weekType", 0),
                     color = o.optLong("color", 0xFF0A84FF),
-                    selectedWeeksCsv = com.coursetable.app.data.parseSelectedWeeks(o.optString("selectedWeeksCsv").take(240)).joinToString(",")
+                    selectedWeeksCsv = o.optString("selectedWeeksCsv").take(240),
+                    courseId = o.optString("courseKey").takeIf { it.isNotBlank() }?.let { key ->
+                        (0..i).mapNotNull { arr.optJSONObject(it)?.optString("courseKey") }.distinct().indexOf(key).toLong() + 1
+                    } ?: (i + 1L)
                 )
             )
         }

@@ -17,6 +17,8 @@ object TinyTextRecognizer {
     private var context: Context? = null
     private var session: OrtSession? = null
     private var characters = emptyList<String>()
+    var supportedCodePoints: Set<Int>? = null
+        private set
     fun initialize(context: Context) { this.context = context.applicationContext }
 
     @Synchronized
@@ -32,6 +34,7 @@ object TinyTextRecognizer {
             }.also {
                 characters = listOf("") + it.metadata.customMetadata["character"].orEmpty().split('\n') + " "
                 require(characters.size == 6906) { "OCR character dictionary does not match model" }
+                supportedCodePoints = characters.joinToString("").codePoints().toArray().toSet()
                 session = it
             }
         }
@@ -70,5 +73,5 @@ object TinyTextRecognizer {
     }
 
     @Synchronized
-    fun release() { session?.close(); session = null; characters = emptyList() }
+    fun release() { session?.close(); session = null; characters = emptyList(); supportedCodePoints = null }
 }

@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.coursetable.app.MainActivity
@@ -34,7 +36,8 @@ data class ReminderStatus(
     val nextCourseName: String,
     val lastFiredMillis: Long,
     val lastFiredName: String,
-    val firedLog: List<String>
+    val firedLog: List<String>,
+    val lastError: String = ""
 )
 
 object ReminderScheduler {
@@ -44,6 +47,8 @@ object ReminderScheduler {
     // 渠道一旦创建，其重要性等属性无法被代码修改；升级配置时须换用新 id 重建
     const val CHANNEL_ID = "course_reminder_v2"
     private const val PREFS = "reminder_state"
+    private const val KEY_CLEANUP_DONE = "legacy_cleanup_v1"
+    private const val KEY_LAST_ERROR = "last_schedule_error"
     private const val KEY_SCHEDULED = "scheduled_request_codes"
     private const val KEY_NEXT_TRIGGER = "next_trigger_millis"
     private const val KEY_NEXT_COURSE = "next_course_name"
@@ -73,7 +78,10 @@ object ReminderScheduler {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 rescheduleInternal(appContext)
-            } catch (_: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordFailure(appContext, e)
             }
         }
     }
@@ -84,7 +92,10 @@ object ReminderScheduler {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 rescheduleInternal(appContext)
-            } catch (_: Throwable) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordFailure(appContext, e)
             } finally {
                 pendingResult.finish()
             }
@@ -101,7 +112,8 @@ object ReminderScheduler {
             lastFiredMillis = prefs.getLong(KEY_LAST_FIRED, 0L),
             lastFiredName = prefs.getString(KEY_LAST_FIRED_NAME, "").orEmpty(),
             firedLog = prefs.getString(KEY_FIRED_LOG, "").orEmpty()
-                .split("\n").filter { it.isNotBlank() }
+                .split("\n").filter { it.isNotBlank() },
+            lastError = prefs.getString(KEY_LAST_ERROR, "").orEmpty()
         )
     }
 
@@ -112,10 +124,8 @@ object ReminderScheduler {
     @Synchronized
     fun claimFired(context: Context, firedKey: String, displayName: String): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val today = LocalDate.now().toString()
-        val fired = prefs.getStringSet(KEY_FIRED_KEYS, emptySet()).orEmpty()
-            .mapNotNull { it.split("@").takeIf { p -> p.size == 2 }?.let { p -> p[0] to p[1] } }
-            .toMap()
+        val today = LocalDate.now()
+        val fired = recentFiredReminders(prefs.getStringSet(KEY_FIRED_KEYS, emptySet()).orEmpty(), today)
         // 该 key 今天已触发过 → 重复，跳过
         if (fired[firedKey] == today) return false
 
@@ -134,7 +144,7 @@ object ReminderScheduler {
             .putLong(KEY_LAST_FIRED, System.currentTimeMillis())
             .putString(KEY_LAST_FIRED_NAME, displayName)
             .putString(KEY_FIRED_LOG, newLog.joinToString("\n"))
-            .apply()
+            .commit().also { if (!it) Log.e("ReminderScheduler", "Could not persist reminder deduplication") }
         return true
     }
 
@@ -151,7 +161,8 @@ object ReminderScheduler {
     }
 
     private suspend fun rescheduleInternal(context: Context) = rescheduleMutex.withLock {
-        cancelAll(context)
+        cancelAllInternal(context)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_LAST_ERROR).apply()
 
         val db = AppDatabase.get(context)
         val settingsRepo = SettingsRepository(context, db.timetableDao())
@@ -161,6 +172,8 @@ object ReminderScheduler {
 
         val settings = settingsRepo.settings.first()
         if (!settings.reminderEnabled) return@withLock
+        // Keep maintenance alive even when this week has no courses.
+        scheduleDailyReplan(context)
 
         val courses = db.courseDao().byTimetableOnce(activeId)
         val periods = timetable.periods()
@@ -170,6 +183,7 @@ object ReminderScheduler {
         val today = LocalDate.now()
         val zone = ZoneId.systemDefault()
         val scheduled = mutableSetOf<String>()
+        val plans = mutableListOf<Triple<Int, Long, Intent>>()
         var nextTrigger = Long.MAX_VALUE
         var nextCourse = ""
 
@@ -188,7 +202,7 @@ object ReminderScheduler {
                 val requestCode = requestCodeOf(course.id, dayOffset)
                 val millis = trigger.atZone(zone).toInstant().toEpochMilli()
                 val timeLabel = period.start.toString().substring(0, 5)
-                setAlarm(context, requestCode, millis) {
+                val extras = Intent().apply {
                     putExtra("courseId", course.id)
                     putExtra("epochDay", date.toEpochDay())
                     putExtra("courseName", course.name)
@@ -196,6 +210,7 @@ object ReminderScheduler {
                     putExtra("timeLabel", timeLabel)
                     putExtra("minutes", settings.reminderMinutes)
                 }
+                plans += Triple(requestCode, millis, extras)
                 scheduled.add(requestCode.toString())
                 if (millis < nextTrigger) {
                     nextTrigger = millis
@@ -204,6 +219,12 @@ object ReminderScheduler {
             }
         }
 
+        // Persist all identities before registering: interrupted scheduling remains cancellable.
+        check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putStringSet(KEY_SCHEDULED, scheduled).commit()) { "Could not persist alarm identities" }
+        for ((requestCode, millis, extras) in plans) {
+            setAlarm(context, requestCode, millis) { putExtras(extras) }
+        }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putStringSet(KEY_SCHEDULED, scheduled)
@@ -211,7 +232,6 @@ object ReminderScheduler {
             .putString(KEY_NEXT_COURSE, nextCourse)
             .apply()
 
-        scheduleDailyReplan(context)
     }
 
     private inline fun setAlarm(
@@ -256,57 +276,48 @@ object ReminderScheduler {
         alarmManager.setWindow(AlarmManager.RTC_WAKEUP, millis, 30 * 60 * 1000L, pi)
     }
 
-    private fun cancelAlarm(context: Context, requestCode: Int) {
+    private fun cancelAlarm(context: Context, requestCode: Int, action: String = ACTION_REMIND) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(context, ReminderReceiver::class.java).apply { action = ACTION_REMIND }
+        val intent = Intent(context, ReminderReceiver::class.java).apply { this.action = action }
         val pi = PendingIntent.getBroadcast(
             context, requestCode, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) ?: return
         alarmManager.cancel(pi)
+        pi.cancel()
     }
 
-    /**
-     * 彻底取消：本地记录的编号 + 按数据库课程推导出的所有可能编号，全部取消。
-     * 不存在的闹钟取消是无害操作，确保没有"孤儿闹钟"残留。
-     */
-    suspend fun cancelAll(context: Context) {
-        // 1) 本地记录
+    private fun recordFailure(context: Context, error: Exception) {
+        // Do not persist exception messages, which could include course or device data.
+        val kind = error.javaClass.simpleName
+        Log.e("ReminderScheduler", "Reminder scheduling failed: $kind")
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LAST_ERROR, "提醒排程失败，请关闭后重新开启提醒").apply()
+    }
+
+    suspend fun cancelAll(context: Context) = rescheduleMutex.withLock { cancelAllInternal(context) }
+
+    private suspend fun cancelAllInternal(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.getStringSet(KEY_SCHEDULED, emptySet()).orEmpty().forEach { codeStr ->
-            codeStr.toIntOrNull()?.let { cancelAlarm(context, it) }
-        }
-
-        // 2) 按数据库推导（覆盖所有课表的所有课程，宁多勿漏）
-        try {
-            val db = AppDatabase.get(context)
-            val courses = db.courseDao().allOnce()
-            for (course in courses) {
-                for (dayOffset in 0..8) {
-                    cancelAlarm(context, requestCodeOf(course.id, dayOffset))
-                }
-            }
-        } catch (_: Throwable) {
-        }
-
-        // 3) 旧版本（v1.2.14 及之前）使用的编号公式，逐一清理可能残留的旧闹钟
-        try {
-            val db = AppDatabase.get(context)
+        val codes = prefs.getStringSet(KEY_SCHEDULED, emptySet()).orEmpty()
+            .mapNotNull { it.toIntOrNull() }.toMutableSet()
+        val cleanup = !prefs.getBoolean(KEY_CLEANUP_DONE, false)
+        if (cleanup) {
+            // One-time migration; ordinary reschedules no longer scan every timetable.
+            val courses = AppDatabase.get(context).courseDao().allOnce()
             val today = LocalDate.now()
-            for (course in db.courseDao().allOnce()) {
-                for (dayOffset in 0..8) {
-                    val epochDay = today.plusDays(dayOffset.toLong()).toEpochDay()
-                    cancelAlarm(context, (course.id xor (epochDay shl 20)).toInt())
-                }
+            for (course in courses) for (dayOffset in 0..8) {
+                codes += requestCodeOf(course.id, dayOffset)
+                val epochDay = today.plusDays(dayOffset.toLong()).toEpochDay()
+                codes += (course.id xor (epochDay shl 20)).toInt()
             }
-        } catch (_: Throwable) {
         }
-
-        prefs.edit()
-            .remove(KEY_SCHEDULED)
-            .remove(KEY_NEXT_TRIGGER)
-            .remove(KEY_NEXT_COURSE)
-            .apply()
+        codes.forEach { cancelAlarm(context, it) }
+        cancelAlarm(context, REQUEST_REPLAN, ACTION_REPLAN)
+        check(prefs.edit()
+            .putBoolean(KEY_CLEANUP_DONE, true)
+            .remove(KEY_SCHEDULED).remove(KEY_NEXT_TRIGGER).remove(KEY_NEXT_COURSE)
+            .commit()) { "Could not persist alarm cleanup" }
     }
 
     fun ensureChannel(context: Context) {

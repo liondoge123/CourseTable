@@ -3,6 +3,7 @@ package com.coursetable.app.importer.edu
 import com.coursetable.app.data.WeekType
 import com.coursetable.app.importer.CandidateCourse
 import com.coursetable.app.importer.PdfParseResult
+import com.coursetable.app.importer.ImageTimetableOcr
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -18,18 +19,16 @@ object ZfJwglxtParser {
             for (i in 0 until list.length()) {
                 val item = list.optJSONObject(i) ?: continue
                 val name = item.optString("kcmc").trim()
-                if (name.isEmpty()) continue
                 val day = item.optString("xqj").trim().toIntOrNull() ?: item.optInt("xqj", 0)
-                if (day !in 1..7) continue
+                if (day !in 1..7) warnings.add("第 ${i + 1} 条记录星期无效：$day")
                 val sectionText = item.optString("jcs").ifBlank { item.optString("jc") }
                 val (startSection, duration) = parseSections(sectionText)
-                if (startSection <= 0) continue
+                if (startSection <= 0) warnings.add("第 ${i + 1} 条记录节次无效：$sectionText")
                 val weeks = parseWeeks(item.optString("zcd"))
                 if (weeks.isEmpty()) {
-                    warnings.add("无法解析周次（${item.optString("zcd")}），已跳过：$name")
-                    continue
+                    warnings.add("第 ${i + 1} 条记录周次无法解析（${item.optString("zcd")}），请校对：$name")
                 }
-                for ((ws, we, wt) in weeks) {
+                for ((ws, we, wt) in weeks.ifEmpty { listOf(Triple(0, 0, 0)) }) {
                     candidates.add(
                         CandidateCourse(
                             name = name,
@@ -40,7 +39,8 @@ object ZfJwglxtParser {
                             duration = duration,
                             startWeek = ws,
                             endWeek = we,
-                            weekType = wt
+                            weekType = wt,
+                            rawLines = listOf("第 ${i + 1} 条教务记录", sectionText, item.optString("zcd"))
                         )
                     )
                 }
@@ -94,19 +94,6 @@ object ZfJwglxtParser {
     }
 
     private fun mergeDuplicateEntries(candidates: List<CandidateCourse>): List<CandidateCourse> {
-        val grouped = candidates.groupBy { Triple(it.name, it.dayOfWeek, it.startSection) }
-        return grouped.values.map { list ->
-            if (list.size == 1) {
-                list.first()
-            } else {
-                val first = list.first()
-                first.copy(
-                    startWeek = list.minOf { it.startWeek },
-                    endWeek = list.maxOf { it.endWeek },
-                    location = list.firstOrNull { it.location.isNotBlank() }?.location ?: first.location,
-                    teacher = list.firstOrNull { it.teacher.isNotBlank() }?.teacher ?: first.teacher
-                )
-            }
-        }.sortedWith(compareBy({ it.dayOfWeek }, { it.startSection }))
+        return ImageTimetableOcr.mergeAcrossPages(candidates)
     }
 }
