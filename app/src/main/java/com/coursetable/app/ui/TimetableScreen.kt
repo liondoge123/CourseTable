@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -263,23 +262,26 @@ private fun WeekHeader(
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
-        val singleRowWidth = if (timetables.size > 1) 336.dp else 252.dp
-        val columns = if (maxWidth < singleRowWidth * fontScale) 2 else 4
-        FlowRow(
+        val capsulePadding = if (maxWidth < 336.dp * fontScale) 8.dp else 10.dp
+        Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = CapsuleArrangement,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            maxItemsInEachRow = columns
+            verticalAlignment = Alignment.CenterVertically
         ) {
             if (timetables.size > 1) {
-                TimetableSelector(timetables, activeTimetableId, onSwitchTimetable)
+                TimetableSelector(
+                    timetables, activeTimetableId, onSwitchTimetable,
+                    modifier = Modifier.weight(1f, fill = false),
+                    horizontalPadding = capsulePadding
+                )
             }
             WeekPickerChip(
                 displayedWeek = displayedWeek,
                 isTodayWeek = displayedWeek == todayWeek,
-                onClick = onTitleClick
+                onClick = onTitleClick,
+                horizontalPadding = capsulePadding
             )
-            FilterCycleButton(filter = filter, onClick = onCycleFilter)
+            FilterCycleButton(filter = filter, onClick = onCycleFilter, horizontalPadding = capsulePadding)
             WeekNavigationPill(
                 canPrev = canPrev,
                 canNext = canNext,
@@ -294,7 +296,8 @@ private fun WeekHeader(
 private fun WeekPickerChip(
     displayedWeek: Int,
     isTodayWeek: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 10.dp
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -306,7 +309,7 @@ private fun WeekPickerChip(
         Row(
             Modifier
                 .fillMaxHeight()
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = horizontalPadding),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isTodayWeek) {
@@ -339,14 +342,16 @@ private fun WeekPickerChip(
 private fun TimetableSelector(
     timetables: List<com.coursetable.app.data.Timetable>,
     activeId: Long,
-    onSwitch: (Long) -> Unit
+    onSwitch: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 10.dp
 ) {
     var expanded by remember { mutableStateOf(false) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val active = timetables.firstOrNull { it.id == activeId } ?: timetables.firstOrNull()
     val colors = MaterialTheme.colorScheme
 
-    Box {
+    Box(modifier) {
         LiquidCapsuleSurface(
             modifier = Modifier
                 .height(36.dp)
@@ -357,7 +362,7 @@ private fun TimetableSelector(
             Row(
                 Modifier
                     .fillMaxHeight()
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = horizontalPadding),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -367,7 +372,7 @@ private fun TimetableSelector(
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 60.dp)
+                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 60.dp)
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
@@ -403,7 +408,11 @@ private fun TimetableSelector(
 }
 
 @Composable
-private fun FilterCycleButton(filter: WeekFilter, onClick: () -> Unit) {
+private fun FilterCycleButton(
+    filter: WeekFilter,
+    onClick: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 10.dp
+) {
     val label = when (filter) {
         WeekFilter.ALL -> "全部"
         WeekFilter.ODD -> "单周"
@@ -424,7 +433,7 @@ private fun FilterCycleButton(filter: WeekFilter, onClick: () -> Unit) {
         Row(
             Modifier
                 .fillMaxHeight()
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = horizontalPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {

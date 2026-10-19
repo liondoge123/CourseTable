@@ -82,6 +82,16 @@ class TimetableDateTest {
             .assertExists()
     }
 
+    private fun captureForVisualReview() {
+        val directory = InstrumentationRegistry.getArguments().getString("uiScreenshotDir") ?: return
+        require(Regex("^/data/local/tmp/coursetable-testing/[a-zA-Z0-9-]+$").matches(directory))
+        compose.waitForIdle()
+        InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("screencap -p $directory/timetable.png").use { descriptor ->
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+            }
+    }
+
     @After fun restoreTables() {
         if (::vm.isInitialized) compose.runOnIdle { visible.value = false }
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
@@ -96,6 +106,7 @@ class TimetableDateTest {
 
     @Test fun changingSemesterReanchorsPagerAndPreservesTheRealCalendarDate() {
         show()
+        captureForVisualReview()
         assertMonday(monday)
         compose.onNodeWithContentDescription("下一周").performClick()
         assertWeek(7)
