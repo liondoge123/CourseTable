@@ -281,6 +281,9 @@ private fun WeekHeader(
                 onClick = onTitleClick,
                 horizontalPadding = capsulePadding
             )
+            if (timetables.size <= 1) {
+                Spacer(Modifier.weight(1f))
+            }
             FilterCycleButton(filter = filter, onClick = onCycleFilter, horizontalPadding = capsulePadding)
             WeekNavigationPill(
                 canPrev = canPrev,
