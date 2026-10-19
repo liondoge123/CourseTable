@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -24,6 +25,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.coursetable.app.CourseApp
+import com.coursetable.app.importer.scheduleConflicts
+import com.coursetable.app.importer.scheduleFingerprint
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +43,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -70,7 +81,9 @@ fun CourseEditorDialog(
     embedded: Boolean = false,
     saveLabel: String? = null,
     protectEdits: Boolean = false,
-    reviewHints: List<String> = emptyList()
+    reviewHints: List<String> = emptyList(),
+    onSaveSuspend: (suspend (Course) -> Unit)? = null,
+    reviewContent: (@Composable () -> Unit)? = null
 ) {
     var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.name) }
     var teacher by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.teacher) }
@@ -83,16 +96,53 @@ fun CourseEditorDialog(
     }
     var showTimePicker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var showWeeksPicker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var timeReviewed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val schedule = if (selectedWeeks.isNotEmpty()) course.withScheduledWeeks(selectedWeeks) else course
     var color by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(course.color) }
     var saving by remember { mutableStateOf(false) }
+    val app = LocalContext.current.applicationContext as CourseApp
+    val scope = rememberCoroutineScope()
+    var sessionDrafts by remember(course.id) { mutableStateOf(listOf(course.copy()) + course.additionalSessions.orEmpty()) }
+    var slot by remember(course.id) { mutableIntStateOf(0) }
+    var loaded by remember(course.id) { mutableStateOf(course.courseId == 0L || !showColorPicker) }
+    var removeSlot by remember { mutableStateOf(false) }
+    var deleteCourseConfirm by remember { mutableStateOf(false) }
+    var pendingSave by remember { mutableStateOf<Course?>(null) }
+    var warnings by remember { mutableStateOf(emptyList<String>()) }
+    var saveError by remember { mutableStateOf<String?>(null) }
+    fun deliver(saved: Course) {
+        if (onSaveSuspend == null) { onSave(saved); return }
+        scope.launch {
+            try { onSaveSuspend(saved) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { saveError = e.message ?: "保存失败，请重试"; saving = false }
+        }
+    }
+    LaunchedEffect(course.courseId) {
+        if (showColorPicker && course.courseId > 0) {
+            sessionDrafts = app.courseRepository.byTimetableOnce(course.timetableId).filter { it.courseId == course.courseId }.sortedBy { it.id }
+            slot = sessionDrafts.indexOfFirst { it.id == course.id }.coerceAtLeast(0)
+            loaded = true
+        }
+    }
+    fun currentSession(): Course = (sessionDrafts.getOrNull(slot) ?: course).copy(location = location, dayOfWeek = day,
+        startSection = startSection, duration = duration).withScheduledWeeks(selectedWeeks)
+    fun switchSlot(next: Int, append: Boolean = false) {
+        if (selectedWeeks.isEmpty()) return
+        val drafts = sessionDrafts.toMutableList()
+        drafts[slot] = currentSession()
+        if (append) drafts += course.copy(id = 0, location = "", dayOfWeek = 1, startSection = 1, duration = 1).withScheduledWeeks((1..totalWeeks).toList())
+        sessionDrafts = drafts
+        slot = next
+        val chosen = drafts[next]
+        location = chosen.location; day = chosen.dayOfWeek; startSection = chosen.startSection; duration = chosen.duration
+        selectedWeeks = chosen.scheduledWeeks()
+    }
 
     fun save() {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || selectedWeeks.isEmpty() || saving) return
-        saving = true
-        onSave(
-            schedule.copy(
+        val saved = (if(showColorPicker) currentSession() else schedule).copy(
                 name = trimmed,
                 teacher = teacher.trim(),
                 location = location.trim(),
@@ -101,13 +151,27 @@ fun CourseEditorDialog(
                 duration = duration,
                 color = color
             )
-        )
+        if (showColorPicker) saved.additionalSessions = sessionDrafts.filterIndexed { index, _ -> index != slot }
+            .map { it.copy(name = trimmed, teacher = teacher.trim(), color = color) }
+        if (!showColorPicker) { saving = true; deliver(saved); return }
+        saving = true
+        scope.launch {
+            try {
+                val existing = app.courseRepository.byTimetableOnce(course.timetableId.takeIf { it > 0 } ?: app.settingsRepository.settings.first().timetableId)
+                saved.reviewedSnapshot = existing
+                val own = (listOf(saved) + saved.additionalSessions.orEmpty())
+                val others = existing.filter { course.courseId == 0L || it.courseId != course.courseId }
+                val duplicates = own.flatMap { s -> others.filter { scheduleFingerprint(s) == scheduleFingerprint(it) }.map { "重复：${it.name}" } }
+                warnings = (own.flatMap { s -> scheduleConflicts(s, others + own.filterNot { it === s }).map { it.description() } } + duplicates).distinct()
+                if (warnings.isEmpty()) deliver(saved) else { pendingSave = saved; saving = false }
+            } catch (e: Exception) { saveError = e.message ?: "读取课表失败，请重试"; saving = false }
+        }
     }
 
     var discardChanges by remember { mutableStateOf(false) }
     val changed = name != course.name || teacher != course.teacher || location != course.location ||
         day != course.dayOfWeek || startSection != course.startSection || duration != course.duration ||
-        selectedWeeks != course.scheduledWeeks().filter { it in 1..totalWeeks } || color != course.color
+        selectedWeeks != course.scheduledWeeks().filter { it in 1..totalWeeks } || color != course.color || sessionDrafts.size > 1
     fun requestDismiss() { if (!saving) { if (protectEdits && changed) discardChanges = true else onDismiss() } }
     val editorBack = rememberPredictiveBack(
         enabled = embedded && !discardChanges && !showWeeksPicker && !showTimePicker,
@@ -131,7 +195,7 @@ fun CourseEditorDialog(
                 // Reduce the editor's inner viewport without changing the sheet height.
                 .imePadding()
         ) {
-            val canSave = name.isNotBlank() && selectedWeeks.isNotEmpty() && !saving
+            val canSave = name.isNotBlank() && selectedWeeks.isNotEmpty() && !saving && loaded
 
             // 单行一体化顶部操作栏（左侧✕、中间居中标题、右侧对称✓）
             Box(
@@ -213,10 +277,11 @@ fun CourseEditorDialog(
                     duration = duration,
                     weeksLabel = if (selectedWeeks.isEmpty()) "未选择周次" else schedule.weeksLabel()
                 )
+                reviewContent?.invoke()
 
                 // 模块 1: 基本信息
-                EditorSectionCard(icon = "📝", title = "基本信息") {
-                    reviewHints.filter { "名称" in it }.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                EditorSectionCard(icon = Icons.Filled.Edit, title = "基本信息") {
+                    if (name.isBlank() && reviewHints.any { "名称" in it }) Text("请补齐课程名称", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -227,84 +292,43 @@ fun CourseEditorDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().testTag("course-editor-name")
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
-                            value = teacher,
-                            onValueChange = { teacher = it },
-                            label = { Text("任课教师") },
-                            showUnfocusedBorder = false,
-                            containerAlpha = 0.55f,
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f).testTag("course-editor-teacher")
+                            value = teacher, onValueChange = { teacher = it }, label = { Text("任课教师", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            showUnfocusedBorder = false, containerAlpha = 0.55f, singleLine = true,
+                            shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).fillMaxHeight().testTag("course-editor-teacher")
                         )
                         OutlinedTextField(
-                            value = location,
-                            onValueChange = { location = it },
-                            label = { Text("上课地点") },
-                            showUnfocusedBorder = false,
-                            containerAlpha = 0.55f,
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f).testTag("course-editor-location")
+                            value = location, onValueChange = { location = it }, label = { Text(if(showColorPicker) "本时段地点" else "上课地点", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            showUnfocusedBorder = false, containerAlpha = 0.55f, singleLine = true,
+                            shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).fillMaxHeight().testTag("course-editor-location")
                         )
                     }
+                    if (showColorPicker) Text("名称、教师和颜色应用于整门课程；地点随所选时段切换。", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
-                // 模块 2: 上课时间
-                EditorSectionCard(icon = "⏰", title = "上课时间") {
-                    reviewHints.filter { "星期" in it || "节次" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    Surface(
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.fillMaxWidth().testTag("course-editor-time"),
-                        shape = LiquidButtonShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f)
-                    ) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("周${WeekdayLabels[day - 1]} · 第 $startSection–${startSection + duration - 1} 节",
-                                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Text("共 $duration 节",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "选择课程时间",
-                                modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                val visibleSessions = sessionDrafts.mapIndexed { index, draft ->
+                    if (index == slot) (if (selectedWeeks.isEmpty()) draft else draft.withScheduledWeeks(selectedWeeks)).copy(
+                        dayOfWeek = day, startSection = startSection, duration = duration, location = location) else draft
                 }
-
-                // 模块 3: 上课周次
-                EditorSectionCard(icon = "📅", title = "上课周次") {
-                    reviewHints.filter { "周次" in it || "单双周" in it }.forEach { Text("原识别结果：$it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    Surface(
-                        onClick = { showWeeksPicker = true },
-                        modifier = Modifier.fillMaxWidth().testTag("course-editor-weeks"),
-                        shape = LiquidButtonShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f)
-                    ) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(if (selectedWeeks.isEmpty()) "选择上课周次" else schedule.weeksLabel(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                    fontWeight = FontWeight.SemiBold)
-                                Text("已选 ${selectedWeeks.size} 周",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "选择上课周次",
-                                modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                val sessionFields: @Composable ColumnScope.() -> Unit = {
+                    saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    val timeNeedsReview = !timeReviewed && reviewHints.any { "星期" in it || "节次" in it }
+                    SessionSettingRow("上课时间", if (timeNeedsReview) "" else "周${WeekdayLabels[day - 1]} · 第 $startSection–${startSection + duration - 1} 节",
+                        Icons.Filled.Schedule, "course-editor-time", !saving && loaded, { showTimePicker = true }, isError = timeNeedsReview)
+                    SessionSettingRow("上课周次", if (selectedWeeks.isEmpty()) "" else schedule.weeksLabel(),
+                        Icons.Filled.DateRange, "course-editor-weeks", !saving && loaded, { showWeeksPicker = true }, isError = selectedWeeks.isEmpty())
                 }
+                if (showColorPicker) CourseSessionsSection(
+                    sessions = visibleSessions, selectedIndex = slot, enabled = !saving && loaded,
+                    onSelect = { switchSlot(it) }, onAdd = { switchSlot(sessionDrafts.size, true) },
+                    onRemove = if(sessionDrafts.size > 1 || onDelete != null) ({ removeSlot = true }) else null,
+                    content = sessionFields
+                ) else EditorSectionCard(icon = Icons.Filled.EventNote, title = "上课时段", content = sessionFields)
 
                 // 模块 4: 课程颜色
-                if (showColorPicker) EditorSectionCard(icon = "🎨", title = "课程颜色") {
+                if (showColorPicker) EditorSectionCard(icon = Icons.Filled.Palette, title = "课程颜色") {
                     val paletteItems = remember {
                         CourseColorPalette.map { c ->
                             Triple(c, c.toArgbLong(), c.luminance() > 0.55f)
@@ -346,8 +370,8 @@ fun CourseEditorDialog(
                     }
                 }
 
-                if (onDelete != null && saveLabel == null) TextButton(onClick = onDelete, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
+                if (onDelete != null && saveLabel == null) DestructiveButton(onClick = { deleteCourseConfirm = true }, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+                    Text("删除整门课程")
                 }
                 Spacer(Modifier.height(24.dp))
             }
@@ -357,12 +381,32 @@ fun CourseEditorDialog(
             }
         }
     } }
+    if (deleteCourseConfirm) AlertDialog(onDismissRequest = { deleteCourseConfirm = false }, title = { Text("删除整门课程？") },
+        text = { Text("课程及其全部 ${sessionDrafts.size} 个上课时段将一起删除。") }, confirmButtonRole = DialogActionRole.Destructive,
+        confirmButton = { TextButton(onClick = { deleteCourseConfirm = false; onDelete?.invoke() }) { Text("删除") } },
+        dismissButton = { TextButton(onClick = { deleteCourseConfirm = false }) { Text("取消") } })
+    if (removeSlot) AlertDialog(onDismissRequest = { removeSlot = false }, title = { Text("删除此时段？") },
+        text = { Text(if(sessionDrafts.size == 1) "这是最后一个时段，将同时删除整门课程。" else "其他时段保留，保存课程后生效。") },
+        confirmButtonRole = DialogActionRole.Destructive,
+        confirmButton = { TextButton(onClick = {
+            removeSlot = false
+            if (sessionDrafts.size == 1) onDelete?.invoke() else {
+                sessionDrafts = sessionDrafts.filterIndexed { index, _ -> index != slot }
+                slot = 0
+                val chosen = sessionDrafts.first(); location = chosen.location; day = chosen.dayOfWeek
+                startSection = chosen.startSection; duration = chosen.duration; selectedWeeks = chosen.scheduledWeeks()
+            }
+        }) { Text("删除") } }, dismissButton = { TextButton(onClick = { removeSlot = false }) { Text("取消") } })
+    if (pendingSave != null) AlertDialog(onDismissRequest = { pendingSave = null }, title = { Text("课程重复或时间冲突") },
+        text = { Text(warnings.joinToString("\n")) }, confirmButton = { TextButton(onClick = { val saved = pendingSave!!; pendingSave = null; saving = true; deliver(saved) }) { Text("仍然保存") } },
+        dismissButton = { TextButton(onClick = { pendingSave = null }) { Text("返回修改") } })
     if (showTimePicker) CourseTimeDialog(
         initialDay = day,
         initialStart = startSection,
         initialEnd = startSection + duration - 1,
         periodCount = periodCount,
         onConfirm = { newDay, newStart, newEnd ->
+            timeReviewed = true
             day = newDay
             startSection = newStart
             duration = newEnd - newStart + 1
@@ -390,7 +434,7 @@ fun CourseEditorDialog(
  */
 @Composable
 private fun EditorSectionCard(
-    icon: String,
+    icon: ImageVector,
     title: String,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
@@ -400,7 +444,7 @@ private fun EditorSectionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(icon, style = MaterialTheme.typography.titleSmall)
+            Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
@@ -430,6 +474,7 @@ private fun CourseCardPreview(
     val accent = Color.fromStoredLong(colorLong)
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val cardBg = lerp(MaterialTheme.colorScheme.surface, accent, if (isDark) 0.28f else 0.16f)
+    val metadataColor = courseMetadataColor()
     val dayLabel = WeekdayLabels.getOrElse(day - 1) { "一" }
 
     Surface(
@@ -502,14 +547,16 @@ private fun CourseCardPreview(
                     ) {
                         Text(
                             text = if (teacher.isBlank()) "任课教师" else teacher,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (teacher.isBlank()) 0.4f else 0.8f),
+                            color = if (teacher.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) else metadataColor,
+                            fontWeight = if (teacher.isBlank()) FontWeight.Normal else FontWeight.Medium,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = if (location.isBlank()) "上课教室/地点" else location,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (location.isBlank()) 0.4f else 0.8f),
+                            color = if (location.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) else metadataColor,
+                            fontWeight = if (location.isBlank()) FontWeight.Normal else FontWeight.Medium,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

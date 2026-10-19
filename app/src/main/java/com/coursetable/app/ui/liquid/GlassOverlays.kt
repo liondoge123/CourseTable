@@ -590,10 +590,11 @@ private fun DialogPageBody(page: DialogPagePresentation, modifier: Modifier = Mo
 internal fun GlassProgressDialog(
     title: String,
     message: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onCancel: (() -> Unit)? = null
 ) {
     GlassOverlayPortal(OverlayDestination.DIALOG) {
-        BackHandler(enabled = LocalBackLayerActive.current && LocalOverlayBackActive.current && !rememberImeVisible(), onBack = {})
+        BackHandler(enabled = LocalBackLayerActive.current && LocalOverlayBackActive.current && !rememberImeVisible(), onBack = { onCancel?.invoke() })
         Box(
             Modifier
                 .fillMaxSize()
@@ -628,6 +629,7 @@ internal fun GlassProgressDialog(
                             style = LiquidTheme.typography.bodySmall,
                             color = LiquidTheme.colorScheme.onSurfaceVariant
                         )
+                        if (onCancel != null) TextButton(onClick = onCancel) { Text("取消识别") }
                     }
                 }
             }
@@ -1228,29 +1230,24 @@ fun DropdownMenuItem(
     val colors = LiquidTheme.colorScheme
     val contentColor = if (selected) colors.primary else colors.onSurface
     CompositionLocalProvider(LocalContentColor provides contentColor) {
-        Box(
+        Row(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp)
-                .clip(RoundedRectangle(20.dp))
-                .background(
-                    if (selected) colors.primary.copy(alpha = if (colors.isDark) 0.20f else 0.12f)
-                    else Color.Transparent
-                )
+                .listItemSurface(ListItemMaterial.Inset, selected = selected, bordered = selected)
                 .semantics { this.selected = selected }
-                .defaultMinSize(minWidth = 140.dp, minHeight = 44.dp)
+                .defaultMinSize(minWidth = 140.dp, minHeight = 48.dp)
                 .clickable(onClick = onClick)
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            text()
+            Box(Modifier.weight(1f)) { text() }
             if (selected) {
                 Icon(
                     imageVector = Icons.Filled.CheckCircle,
                     contentDescription = "当前课表",
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .size(20.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = colors.primary
                 )
             }

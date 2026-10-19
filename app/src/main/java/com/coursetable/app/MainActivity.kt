@@ -227,13 +227,11 @@ private fun MainScreen(
                             label = "RootTabTransition"
                         ) { dest ->
                             when (dest) {
-                                // Page transitions and their scrims need the whole window.
-                                // These two root screens do not own a FullscreenPageContainer,
-                                // so apply their safe area here, inside the transition.
-                                RootDestination.TIMETABLE -> Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                                // Each page owns its scroll-content insets and glass edge.
+                                RootDestination.TIMETABLE -> Box(Modifier.fillMaxSize()) {
                                     TimetableScreen(vm, bottomContentPadding = FloatingDockInset)
                                 }
-                                RootDestination.COURSES -> Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                                RootDestination.COURSES -> Box(Modifier.fillMaxSize()) {
                                     CourseManageScreen(
                                         courses = courses,
                                         totalWeeks = settings.totalWeeks,
@@ -298,7 +296,8 @@ private fun MainScreen(
                     totalWeeks = settings.totalWeeks,
                     periodCount = settings.periods.size.coerceAtLeast(1),
                     onDismiss = { vm.closeEditor() },
-                    onSave = { vm.saveCourse(it) }
+                    onSave = { vm.saveCourse(it) },
+                    onSaveSuspend = { vm.saveCourseAwait(it) }
                 )
             }
         }

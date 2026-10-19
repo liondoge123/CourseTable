@@ -1,7 +1,5 @@
 package com.coursetable.app.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -10,11 +8,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.liquid.Text
+import com.coursetable.app.ui.liquid.ListItemMaterial
+import com.coursetable.app.ui.liquid.listItemSurface
 import com.coursetable.app.ui.theme.LiquidTheme
 
 @Composable
@@ -28,16 +27,11 @@ fun OptionChip(
 ) {
     val shape = remember(large) { RoundedCornerShape(if (large) 12.dp else 10.dp) }
     val colors = LiquidTheme.colorScheme
-    val bg = if (selected) colors.primary.copy(alpha = if (outlined) 0.14f else 0.18f)
-        else if (outlined) colors.surface else colors.surfaceContainerHigh.copy(alpha = 0.38f)
     val textCol = if (selected) colors.primary else colors.onSurfaceVariant
-    val borderCol = if (selected) colors.primary.copy(alpha = 0.45f) else colors.outlineVariant
 
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(bg)
-            .then(if (outlined) Modifier.border(1.dp, borderCol, shape) else Modifier)
+            .listItemSurface(ListItemMaterial.Inset, selected, shape, bordered = outlined)
             .clickable(onClick = onClick)
             .padding(horizontal = if (large) 10.dp else 6.dp, vertical = if (large) 8.dp else 4.dp),
         contentAlignment = Alignment.Center

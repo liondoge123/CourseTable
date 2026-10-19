@@ -163,9 +163,11 @@ class OverlayGlassPresentationTest {
     }
 
     private fun capture(name: String) {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val output = File(context.getExternalFilesDir(null), "overlay-validation").apply { mkdirs() }
-        val bitmap = compose.onRoot(useUnmergedTree = true).captureToImage().asAndroidBitmap()
-        File(output, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val session = InstrumentationRegistry.getArguments().getString("listDesignEvidenceSession") ?: return
+        require(session.matches(Regex("[a-zA-Z0-9-]+")))
+        require(name.matches(Regex("[a-z-]+\\.png")))
+        compose.onRoot(useUnmergedTree = true).captureToImage()
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("screencap -p /data/local/tmp/coursetable-testing/$session/$name")).use { it.readBytes() }
     }
 }

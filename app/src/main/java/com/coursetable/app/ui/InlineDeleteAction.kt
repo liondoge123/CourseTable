@@ -32,7 +32,7 @@ import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 
 /**
  * 行内删除操作：
- * - compact = true：固定 40dp × 40dp；确认状态使用红底白色垃圾桶，不挤压列表排版；
+ * - compact = true：固定 48dp × 48dp；确认状态使用红底白色垃圾桶，不挤压列表排版；
  * - compact = false：固定 112dp × 48dp，以“垃圾桶 + 文字”呈现完整的删除语义。
  */
 @Composable
@@ -57,7 +57,7 @@ fun InlineDeleteAction(
         IconButton(
             onClick = if (armed) onConfirm else onArm,
             modifier = Modifier
-                .size(40.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .background(backgroundColor),
             colors = IconButtonDefaults.iconButtonColors(

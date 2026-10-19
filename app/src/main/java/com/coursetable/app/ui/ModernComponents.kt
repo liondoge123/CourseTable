@@ -1,22 +1,23 @@
 package com.coursetable.app.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.liquid.HorizontalDivider
-import com.coursetable.app.ui.liquid.Surface
 import com.coursetable.app.ui.liquid.Text
+import com.coursetable.app.ui.liquid.ListItemSurface
+import com.coursetable.app.ui.liquid.ListItemDefaults
+import com.coursetable.app.ui.liquid.ListItemMaterial
 import com.coursetable.app.ui.theme.LiquidTheme
 
 @Composable
@@ -24,12 +25,13 @@ fun PageHeader(
     title: String,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(
@@ -53,20 +55,28 @@ fun PageHeader(
     }
 }
 
+/** Parent pages own the content inset, so headings and their cards share one axis. */
+@Composable
+internal fun PageSectionTitle(title: String, modifier: Modifier = Modifier) {
+    Text(
+        text = title,
+        modifier = modifier.fillMaxWidth(),
+        style = LiquidTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = LiquidTheme.colorScheme.onSurfaceVariant
+    )
+}
+
 @Composable
 fun SectionFrame(
     modifier: Modifier = Modifier,
-    outlined: Boolean = false,
     containerAlpha: Float = 1f,
     content: @Composable () -> Unit
 ) {
-    Surface(
+    ListItemSurface(
         modifier = modifier.fillMaxWidth(),
-        shape = LiquidTheme.shapes.medium,
-        color = LiquidTheme.colorScheme.surface.copy(alpha = containerAlpha),
-        border = if (outlined) BorderStroke(1.dp, LiquidTheme.colorScheme.outlineVariant) else null,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp
+        shape = ListItemDefaults.GroupShape,
+        opacity = containerAlpha
     ) {
         content()
     }
@@ -76,17 +86,16 @@ fun SectionFrame(
 @Composable
 internal fun FormSectionCard(
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
+    ListItemSurface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = LiquidTheme.colorScheme.surface.copy(alpha = 0.20f),
-        border = null
+        material = ListItemMaterial.Inset
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(if (compact) 12.dp else 16.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
             content = content
         )
     }
@@ -119,7 +128,7 @@ fun SheetHeader(
 fun HairlineDivider(modifier: Modifier = Modifier) {
     HorizontalDivider(
         modifier = modifier.padding(horizontal = 16.dp),
-        thickness = 1.dp,
+        thickness = 0.5.dp,
         color = LiquidTheme.colorScheme.outlineVariant
     )
 }

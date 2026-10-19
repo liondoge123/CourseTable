@@ -1,6 +1,5 @@
 package com.coursetable.app.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,18 +9,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.data.Timetable
 import com.coursetable.app.ui.icons.Icons
@@ -46,101 +45,43 @@ fun TimetableManageScreen(
     var renameTarget by remember { mutableStateOf<Timetable?>(null) }
     var timetableToDelete by remember { mutableStateOf<Timetable?>(null) }
 
-    FullscreenPageContainer(Modifier.testTag("timetable-manage-page")) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+    LiquidScrollablePage(Modifier.testTag("timetable-manage-page"), topBar = {
+        LiquidPageTopBar("课表管理", onBack) {
+            IconButton(onClick = { showCreate = true }) {
+                Icon(Icons.Filled.Add, contentDescription = "新建课表")
             }
-            Text(
-                "课表管理",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f)
-            )
         }
-
-        SectionFrame {
-            LazyColumn {
-                itemsIndexed(timetables, key = { _, table -> table.id }) { index, table ->
-                    val isActive = table.id == activeId
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onSwitch(table.id) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (isActive) Icons.Filled.CheckCircle
-                            else Icons.Filled.RadioButtonUnchecked,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (isActive) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.size(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                table.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Text(
-                                "${table.semesterStart().format(DateTimeFormatter.ISO_LOCAL_DATE)} 开学 · " +
-                                    "${table.totalWeeks} 周 · ${table.periods().size} 节",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        IconButton(onClick = { renameTarget = table }) {
-                            Icon(
-                                Icons.Filled.Edit,
-                                contentDescription = "重命名",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (timetables.size > 1) {
-                            IconButton(onClick = { timetableToDelete = table }) {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    contentDescription = "删除课表",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        } else {
-                            IconButton(onClick = {}, enabled = false) {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    contentDescription = "无法删除唯一课表",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                )
-                            }
-                        }
-                    }
-                    if (index != timetables.lastIndex) {
-                        HorizontalDivider(Modifier.padding(start = 46.dp, end = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                    }
+    }) { pageInsets ->
+        LazyColumn(Modifier.fillMaxSize().selectableGroup().testTag("timetables-list"), contentPadding = pageInsets.pagePadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "summary") {
+                Text(
+                    "共 ${timetables.size} 个课表 · 点按切换当前课表",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            items(timetables, key = { it.id }, contentType = { "timetable" }) { table ->
+                TimetableCard(
+                    table = table,
+                    isActive = table.id == activeId,
+                    canDelete = timetables.size > 1,
+                    onSwitch = { onSwitch(table.id) },
+                    onRename = { renameTarget = table },
+                    onDelete = { timetableToDelete = table }
+                )
+            }
+            item(key = "create") {
+                Button(
+                    onClick = { showCreate = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("新建课表")
                 }
             }
         }
-
-        Button(
-            onClick = { showCreate = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(6.dp))
-            Text("新建课表")
-        }
-    }
     }
 
     if (showCreate) {
@@ -200,6 +141,72 @@ fun TimetableManageScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun TimetableCard(
+    table: Timetable,
+    isActive: Boolean,
+    canDelete: Boolean,
+    onSwitch: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    ListItemSurface(
+        modifier = Modifier.fillMaxWidth().testTag("timetable-card-${table.id}"),
+        selected = isActive
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth()
+                    .selectable(selected = isActive, role = Role.RadioButton, onClick = onSwitch)
+                    .testTag("timetable-select-${table.id}")
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                ListItemIcon(
+                    if (isActive) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    modifier = Modifier.padding(top = 2.dp),
+                    tint = if (isActive) colors.primary else colors.onSurfaceVariant
+                )
+                Spacer(Modifier.size(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(table.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "${table.semesterStart().format(DateTimeFormatter.ISO_LOCAL_DATE)} 开学 · " +
+                            "${table.totalWeeks} 周 · ${table.periods().size} 节",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = ListItemDefaults.TextInset, end = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isActive) {
+                    Text(
+                        "当前课表",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.primary
+                    )
+                } else Spacer(Modifier.weight(1f))
+                IconButton(onClick = onRename) {
+                    Icon(Icons.Filled.Edit, "重命名「${table.name}」", Modifier.size(18.dp), tint = colors.onSurfaceVariant)
+                }
+                IconButton(onClick = onDelete, enabled = canDelete) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        if (canDelete) "删除课表「${table.name}」" else "无法删除唯一课表",
+                        Modifier.size(18.dp),
+                        tint = if (canDelete) colors.error else colors.onSurfaceVariant.copy(alpha = 0.4f)
+                    )
+                }
+            }
+        }
     }
 }
 

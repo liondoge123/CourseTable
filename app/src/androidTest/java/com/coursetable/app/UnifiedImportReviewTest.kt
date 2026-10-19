@@ -43,9 +43,12 @@ class UnifiedImportReviewTest {
         compose.waitForIdle()
     }
     private fun screenshot(name: String) {
+        val session = InstrumentationRegistry.getArguments().getString("listDesignEvidenceSession") ?: return
+        require(session.matches(Regex("[a-zA-Z0-9-]+")))
         compose.mainClock.advanceTimeBy(500)
-        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, "review-$name.png")
-        compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap -> file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+        compose.onRoot().captureToImage()
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("screencap -p /data/local/tmp/coursetable-testing/$session/review-$name.png")).use { it.readBytes() }
     }
     @Test fun previewListAndAdvisoryConfirmation() {
         var imported = false
@@ -61,14 +64,14 @@ class UnifiedImportReviewTest {
         compose.onNodeWithText("高等数学").assertDoesNotExist()
         screenshot("light-list")
         compose.onNodeWithText("导入 3 条记录").performClick()
-        compose.onNodeWithText("返回校对").assertIsDisplayed()
+        compose.onNodeWithText("返回修改").assertIsDisplayed()
         screenshot("light-confirm")
         compose.onAllNodesWithText("确认导入").onLast().performClick()
         compose.runOnIdle { assertTrue(imported) }
     }
     @Test fun errorsLeadToEditorAndSavedRecordLeavesQueue() {
         show(sample().map { if(it.draftId == "math") it.copy(name = "") else it })
-        compose.onNodeWithText("处理 1 条必修正项").performClick()
+        compose.onNodeWithText("处理 1 条问题").performClick()
         compose.onNodeWithText("课程名称 *").performTextInput("高等数学")
         compose.onNodeWithText("保存并校对下一条").performClick()
         compose.onNodeWithText("大学英语").assertExists()
@@ -82,6 +85,8 @@ class UnifiedImportReviewTest {
         show(sample(), dark = true)
         screenshot("dark-preview")
         compose.onNodeWithText("追加 ▾", substring = true).performClick()
+        compose.onNodeWithText("新建课表 ▾", substring = true).performClick()
+        compose.onNodeWithText("覆盖 ▾", substring = true).assertIsDisplayed()
         compose.onNodeWithText("导入 3 条记录").performClick()
         compose.onNodeWithText("覆盖并导入").assertIsDisplayed()
         screenshot("dark-confirm")
@@ -96,7 +101,7 @@ class UnifiedImportReviewTest {
         compose.onNodeWithText("全部周次", substring = true).assertDoesNotExist()
         compose.onNodeWithText("08:00").assertDoesNotExist()
         compose.onNodeWithText("08:45").assertDoesNotExist()
-        compose.onNodeWithText("周一 · 第 1—2 节 · 1—16 周").assertExists()
+        compose.onNodeWithText("周一 · 第 1—2 节 · 第 1–16 周").assertExists()
         val destination = compose.onNodeWithText("追加 ▾", substring = true).fetchSemanticsNode().boundsInRoot
         val action = compose.onNodeWithText("导入 3 条记录").fetchSemanticsNode().boundsInRoot
         assertTrue(kotlin.math.abs(destination.center.y - action.center.y) < 2f)
@@ -156,10 +161,10 @@ class UnifiedImportReviewTest {
     @Test fun longCourseKeepsFiveSectionsAfterReview() {
         show(listOf(sample().last().copy(needsReview = true)))
         compose.onNodeWithText("开始校对").performClick()
-        compose.onNodeWithText("共 5 节").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("course-editor-time").performScrollTo().assertTextContains("周五 · 第 5–9 节")
         screenshot("long-course-editor")
         compose.onNodeWithText("保存并校对下一条").performClick()
-        compose.onNodeWithText("周五 · 第 5—9 节 · 2—16 周 · 双周").assertExists()
+        compose.onNodeWithText("周五 · 第 5—9 节 · 第 2–16 周 · 双周").assertExists()
     }
 
     @Test fun csvUsesUnifiedPreviewAndFailedImportRetainsDraftForRetry() = importFile(false)

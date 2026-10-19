@@ -167,36 +167,36 @@ fun PeriodTimeSchemesDialog(
             if (item == null) {
                 Column(
                     Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.Top
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap)
                 ) {
                     if (resolvedActiveSchemeId == null) {
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) {
+                            Modifier.fillMaxWidth().listItemSurface(ListItemMaterial.Glass).clickable(enabled = !busy) {
                                 if (pendingSchemeId != null) return@clickable
                                 openEditor(PeriodTimeScheme("current", "当前自定义", periods, durationMinutes), current = true)
-                            }.heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+                            }.heightIn(min = 64.dp).padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(Modifier.weight(1f)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("当前自定义", style = MaterialTheme.typography.titleSmall)
                                 Text("${periods.size} 节", style = MaterialTheme.typography.bodySmall)
                             }
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "编辑当前时间", modifier = Modifier.size(20.dp))
                         }
-                        HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
                     availableSchemes.forEach { scheme ->
                         val selected = scheme.id == resolvedActiveSchemeId
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) {
+                            Modifier.fillMaxWidth().listItemSurface(ListItemMaterial.Glass, selected = selected).clickable(enabled = !busy) {
                                 if (pendingSchemeId != null) return@clickable
                                 openEditor(scheme, current = scheme.isDefault)
                             }
-                                .heightIn(min = 56.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+                                .heightIn(min = 64.dp).padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(scheme.name, style = MaterialTheme.typography.titleSmall)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(scheme.name, style = MaterialTheme.typography.titleSmall,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                                 Text("${scheme.periods.size} 节", style = MaterialTheme.typography.bodySmall)
                             }
                             TextButton(
@@ -224,10 +224,9 @@ fun PeriodTimeSchemesDialog(
                                 },
                                 enabled = !busy
                             ) {
-                                Icon(Icons.Filled.Delete, "删除${scheme.name}", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Filled.Delete, "删除${scheme.name}", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                             }
                         }
-                        HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
                     Spacer(Modifier.height(10.dp))
                     Button(
@@ -240,7 +239,7 @@ fun PeriodTimeSchemesDialog(
             } else {
                 Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.Top
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap)
                 ) {
                     if (!presentedEditingCurrent) {
                         OutlinedTextField(
@@ -279,9 +278,9 @@ fun PeriodTimeSchemesDialog(
                     HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     item.periods.forEachIndexed { index, period ->
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(SchemeRowCornerRadius)).clickable(enabled = !busy) { editingIndex = index }
+                            Modifier.fillMaxWidth().listItemSurface(ListItemMaterial.Inset).clickable(enabled = !busy) { editingIndex = index }
                                 .testTag("period-row-${index + 1}")
-                                .heightIn(min = 56.dp).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                                .heightIn(min = 56.dp).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("第 ${index + 1} 节课", style = MaterialTheme.typography.bodyMedium,
@@ -299,7 +298,6 @@ fun PeriodTimeSchemesDialog(
                                 }
                             }
                         }
-                        if (index != item.periods.lastIndex) HorizontalDivider(Modifier.padding(horizontal = SchemeRowCornerRadius))
                     }
                     Spacer(Modifier.height(10.dp))
                     OutlinedButton(onClick = {

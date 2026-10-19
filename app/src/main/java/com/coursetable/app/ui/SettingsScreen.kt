@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -267,13 +269,14 @@ fun SettingsScreen(
             title = { Text("主题模式") },
             text = {
                 val dismissController = LocalDialogDismissController.current
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap), modifier = Modifier.selectableGroup()) {
                     ThemeMode.entries.forEach { mode ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(LiquidButtonShape)
-                                .clickable {
+                                .listItemSurface(ListItemMaterial.Glass, selected = current == mode)
+                                .testTag("theme-mode-${mode.key}")
+                                .selectable(selected = current == mode, role = Role.RadioButton, onClick = {
                                     dismissController?.dismiss {
                                         scope.launch { settingsRepo.save(themeMode = mode.key) }
                                         showThemeModePicker = false
@@ -281,23 +284,13 @@ fun SettingsScreen(
                                         scope.launch { settingsRepo.save(themeMode = mode.key) }
                                         showThemeModePicker = false
                                     }
-                                }
-                                .padding(vertical = 4.dp),
+                                })
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(
-                                selected = current == mode,
-                                onClick = {
-                                    dismissController?.dismiss {
-                                        scope.launch { settingsRepo.save(themeMode = mode.key) }
-                                        showThemeModePicker = false
-                                    } ?: run {
-                                        scope.launch { settingsRepo.save(themeMode = mode.key) }
-                                        showThemeModePicker = false
-                                    }
-                                }
-                            )
-                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(mode.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium, color = if (current == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            ListChoiceIndicator(current == mode)
                         }
                     }
                 }
@@ -314,7 +307,8 @@ fun SettingsScreen(
             onDismissRequest = { showPermDialog = false },
             title = { Text("权限检查") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.heightIn(max = 440.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap)) {
                     PermRow(
                         icon = Icons.Filled.Notifications,
                         title = "通知权限",
@@ -453,27 +447,20 @@ fun SettingsScreen(
                 null -> Unit
             }
         } else {
-            FullscreenPageContainer {
+            LiquidScrollablePage { pageInsets ->
                 Column(
                     Modifier
                         .fillMaxSize()
+                        .testTag("settings-scroll")
                         .verticalScroll(scrollState)
-                        .padding(bottom = bottomContentPadding)
-                        .padding(16.dp),
+                        .padding(pageInsets.pagePadding(extraBottom = bottomContentPadding)),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                "设置",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "课程安排、提醒、外观与数据",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+                    PageHeader(
+                        "设置",
+                        subtitle = "课程安排、提醒、外观与数据",
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                    )
 
         SettingsGroup(title = "学期与课表") {
             SettingItem(
@@ -591,6 +578,7 @@ fun SettingsScreen(
                             append(" · ${reminderStatus.nextCourseName} · 共 ${reminderStatus.scheduledCount} 个")
                         }
                     }
+                    if (reminderStatus.lastError.isNotBlank()) append("\n${reminderStatus.lastError}")
                     if (reminderStatus.firedLog.isNotEmpty()) {
                         append("\n最近触发：")
                         reminderStatus.firedLog.forEach { append("\n  $it") }
@@ -648,6 +636,26 @@ fun SettingsScreen(
         }
 
         SettingsGroup(title = "数据与安全") {
+            SettingItem(
+                icon = Icons.Filled.IosShare,
+                title = "复制当前课表分享文本",
+                subtitle = "同学可通过「粘贴导入」校对后导入",
+                onClick = {
+                    scope.launch {
+                        try {
+                            val sharedCourses = courseRepo.byTimetableOnce(settings.timetableId)
+                            val text = withContext(Dispatchers.Default) {
+                                com.coursetable.app.importer.PasteTimetableImporter.share(sharedCourses, settings.timetableName)
+                            }
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("课表分享", text))
+                            toast("已复制当前课表，可发送给同学")
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { toast(e.message ?: "分享失败，请重试") }
+                    }
+                }
+            )
+            SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.Save,
                 title = "导出备份文件",
@@ -722,21 +730,19 @@ private fun PermRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
+            .listItemSurface(ListItemMaterial.Glass)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
+        ListItemIcon(
             icon,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
             tint = if (error) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
+        Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 text = hint,
                 style = MaterialTheme.typography.bodySmall,
@@ -756,14 +762,8 @@ private fun PermRow(
 @Composable
 private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        SectionFrame(outlined = false) {
+        PageSectionTitle(title)
+        SectionFrame {
             Column { content() }
         }
     }
@@ -772,8 +772,8 @@ private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
 /** 分组内分隔线，与各设置行的文字起点对齐。 */
 @Composable
 private fun SettingsDivider() {
-    // 16dp row inset + 22dp icon + 14dp gap: start at the text column.
-    HorizontalDivider(Modifier.padding(start = 52.dp, end = 16.dp))
+    // Shared leading icon and gap keep separators on the same text axis.
+    HorizontalDivider(Modifier.padding(start = ListItemDefaults.TextInset, end = 16.dp))
 }
 
 /** 带图标、标题、副标题与尾部控件的设置行 */
@@ -791,20 +791,18 @@ private fun SettingItem(
             .fillMaxWidth()
             .heightIn(min = 58.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
+        ListItemIcon(
             icon,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
             tint = if (tint == MaterialTheme.colorScheme.onSurface) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else tint
         )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = tint)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
+        Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = tint)
             if (subtitle != null) {
                 Text(
                     text = subtitle,
@@ -816,12 +814,7 @@ private fun SettingItem(
         if (trailing != null) {
             trailing()
         } else if (onClick != null) {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            ListItemChevron()
         }
     }
 }
@@ -839,15 +832,10 @@ private fun ThemeColorItem(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Filled.Palette,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text("主题色彩", style = MaterialTheme.typography.bodyLarge)
+            ListItemIcon(Icons.Filled.Palette, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(ListItemDefaults.IconGap))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("主题色彩", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                 Text(
                     text = selected.label,
                     style = MaterialTheme.typography.bodySmall,
@@ -855,9 +843,10 @@ private fun ThemeColorItem(
                 )
             }
         }
-        Row(
-            Modifier.padding(start = 36.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(start = 44.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ThemeColor.entries.forEach { color ->
                 val isSelected = color == selected
@@ -912,14 +901,9 @@ private fun StepperItem(
             .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(14.dp))
-        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        ListItemIcon(icon, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
+        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         IconButton(onClick = onDecrease) {
             Icon(Icons.Filled.Remove, contentDescription = "减", modifier = Modifier.size(20.dp))
         }
@@ -943,17 +927,12 @@ private fun AlignItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            Icons.Filled.FormatAlignLeft,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(14.dp))
+        ListItemIcon(Icons.Filled.FormatAlignLeft, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
         Text(
             text = "课程卡片文字对齐",
             style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
+            fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f)
         )
         Row(

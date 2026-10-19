@@ -84,7 +84,7 @@ internal fun ImportCourseSource(session: VisualImportSession, candidate: Candida
     val region = regions.getOrNull(selected)
     val page = session.pages.firstOrNull { it.index == region?.page }
     val regionBitmap = if (page != null && region != null) rememberReviewBitmap(page.image, region) else null
-    FormSectionCard {
+    FormSectionCard(Modifier.testTag("import-course-source-card")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "原图对照",
@@ -105,13 +105,12 @@ internal fun ImportCourseSource(session: VisualImportSession, candidate: Candida
             }
             if (page != null && region != null) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val imageHeight = if (compact && regionBitmap != null) (maxWidth * regionBitmap.height / regionBitmap.width.coerceAtLeast(1)).coerceIn(32.dp, if (keyboardVisible) 48.dp else 96.dp) else if (compact) 48.dp else 160.dp
-                Box(Modifier.fillMaxWidth().height(imageHeight).clickable { enlarged = true }, contentAlignment = Alignment.Center) {
+                val imageHeight = if (compact && regionBitmap != null) (maxWidth * regionBitmap.height / regionBitmap.width.coerceAtLeast(1)).coerceIn(if (keyboardVisible) 32.dp else 48.dp, if (keyboardVisible) 40.dp else 72.dp) else if (compact) 48.dp else 160.dp
+                Box(Modifier.fillMaxWidth().height(imageHeight).clip(RoundedRectangle(12.dp)).testTag("import-course-fragment").clickable { enlarged = true }, contentAlignment = Alignment.Center) {
                     if (regionBitmap != null && !regionBitmap.isRecycled) androidx.compose.foundation.Image(regionBitmap.asImageBitmap(), "对应原图片段，点击放大", Modifier.fillMaxSize()) else CircularProgressIndicator(Modifier.size(22.dp))
                 }
                 }
                 if (!compact) TextButton(onClick = { enlarged = true }) { Text("放大片段") }
-                else Text("点击片段放大", style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.onSurfaceVariant)
             } else Text("此记录没有对应的原图片段，可查看完整原图", style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.onSurfaceVariant)
             if (!compact) candidate.reviewIssues(settings).forEach { Text(it, style = LiquidTheme.typography.bodySmall, color = LiquidTheme.colorScheme.error) }
     }

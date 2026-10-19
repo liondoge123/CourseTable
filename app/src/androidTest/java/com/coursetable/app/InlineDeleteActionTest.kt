@@ -82,9 +82,12 @@ class InlineDeleteActionTest {
         }
 
         composeRule.onNodeWithText("删除").performClick()
+        // With autoAdvance disabled, commit the new state and finish the label transition.
+        composeRule.mainClock.advanceTimeBy(250)
         composeRule.onNodeWithText("确认删除").assertExists()
 
         composeRule.mainClock.advanceTimeBy(5_001)
+        composeRule.mainClock.advanceTimeBy(250)
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("确认删除").assertDoesNotExist()

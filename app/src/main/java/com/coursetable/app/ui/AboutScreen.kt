@@ -272,35 +272,14 @@ fun AboutScreen(
         }
     }
 
-    FullscreenPageContainer(Modifier.testTag("about-page")) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Top Bar
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                }
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "关于 CourseTable",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
+    LiquidScrollablePage(Modifier.testTag("about-page"), topBar = {
+        LiquidPageTopBar("关于 CourseTable", onBack)
+    }) { pageInsets ->
             Column(
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(bottom = bottomContentPadding),
+                    .padding(pageInsets.pagePadding(extraBottom = bottomContentPadding)),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Header: Logo + App Name + Version + Slogan
@@ -369,13 +348,7 @@ fun AboutScreen(
                 }
 
                 // Section 1: Project & Community
-                Text(
-                    "项目与开源",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                PageSectionTitle("项目与开源")
                 SectionFrame {
                     Column {
                         AboutActionItem(
@@ -409,13 +382,7 @@ fun AboutScreen(
                 }
 
                 // Section 2: License & Compliance (Apache 2.0)
-                Text(
-                    "开源协议与合规",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                PageSectionTitle("开源协议与合规")
                 SectionFrame {
                     Column {
                         AboutActionItem(
@@ -481,13 +448,7 @@ fun AboutScreen(
                 }
 
                 // Section 4: Privacy & Features
-                Text(
-                    "特性与设计理念",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                PageSectionTitle("特性与设计理念")
                 SectionFrame {
                     Column {
                         AboutInfoItem(
@@ -511,13 +472,7 @@ fun AboutScreen(
                 }
 
                 // Section 5: Third-Party Libraries
-                Text(
-                    "第三方开源库与致谢",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                PageSectionTitle("第三方开源库与致谢")
                 SectionFrame {
                     Column {
                         LibraryCreditItem(
@@ -526,49 +481,49 @@ fun AboutScreen(
                             copyright = "© Kyant",
                             description = "Liquid Glass 拟态玻璃渲染引擎与平滑圆角几何支持"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "Lucide Icons",
                             license = "ISC",
                             copyright = "© Lucide Contributors",
                             description = "精美一致的轻量级矢量轮廓图标库"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "AndroidX & Jetpack Compose",
                             license = "Apache 2.0",
                             copyright = "© Google / AOSP",
                             description = "现代 Android 声明式 UI 工具集与核心架构组件"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "Room & DataStore",
                             license = "Apache 2.0",
                             copyright = "© Google / AOSP",
                             description = "设备端高效本地关系型数据库与轻量偏好存储引擎"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "PDFBox-Android",
                             license = "Apache 2.0",
                             copyright = "© Tom Roush / Apache Software Foundation",
                             description = "高效可靠的 PDF 课表文档智能解析引擎"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "ML Kit Text Recognition",
                             license = "Android SDK License",
                             copyright = "© Google LLC",
                             description = "设备端离线智能 OCR 课程表图像识别"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "OkHttp & Jsoup",
                             license = "Apache 2.0 / MIT",
                             copyright = "© Square, Inc. & Jonathan Hedley",
                             description = "网络请求传输与教务系统 HTML 页面安全解析"
                         )
-                        AboutDivider()
+                        AboutDivider(inset = 16.dp)
                         LibraryCreditItem(
                             name = "ONNX Runtime & PaddleOCR",
                             license = "MIT / Apache 2.0",
@@ -598,7 +553,6 @@ fun AboutScreen(
                     )
                 }
             }
-        }
     }
 
     // License Dialog
@@ -680,8 +634,8 @@ fun AboutScreen(
 }
 
 @Composable
-private fun AboutDivider() {
-    HorizontalDivider(Modifier.padding(start = 52.dp, end = 16.dp))
+private fun AboutDivider(inset: androidx.compose.ui.unit.Dp = ListItemDefaults.TextInset) {
+    HorizontalDivider(Modifier.padding(start = inset, end = 16.dp))
 }
 
 @Composable
@@ -703,17 +657,12 @@ private fun AboutActionItem(
                     Modifier.clickable(onClick = onClick)
                 }
             )
-            .padding(horizontal = 16.dp, vertical = 13.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
+        ListItemIcon(icon)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
+        Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(
                 subtitle,
@@ -736,12 +685,7 @@ private fun AboutActionItem(
             }
             Spacer(Modifier.width(4.dp))
         }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        ListItemChevron()
     }
 }
 
@@ -754,21 +698,13 @@ private fun AboutInfoItem(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier
-                .padding(top = 2.dp)
-                .size(20.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
+        ListItemIcon(icon, Modifier.padding(top = 2.dp))
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(2.dp))
             Text(
                 description,
                 style = MaterialTheme.typography.bodySmall,
@@ -799,6 +735,7 @@ private fun LibraryCreditItem(
         ) {
             Text(
                 name,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold
             )

@@ -9,6 +9,7 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -44,6 +46,8 @@ import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 import com.coursetable.app.importer.edu.ZfJwglxtParser
 import com.coursetable.app.importer.edu.deriveSemester
+import com.coursetable.app.importer.edu.EduImportFailure
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,12 +63,14 @@ import androidx.compose.ui.text.font.FontWeight
 fun EduImportScreen(
     semesterStart: LocalDate,
     onDone: (PdfParseResult, String) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onPaste: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var adapter by remember { mutableStateOf<SchoolAdapter?>(null) }
     var customUrl by remember { mutableStateOf("") }
+    var schoolQuery by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var currentUrl by remember { mutableStateOf<String?>(null) }
@@ -89,25 +95,19 @@ fun EduImportScreen(
         onDispose { clearWebSession() }
     }
 
-    FullscreenPageContainer {
+    LiquidScrollablePage(topBar = { LiquidPageTopBar("从教务系统导入", onCancel) }) { pageInsets ->
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .then(if (adapter != null) Modifier.padding(pageInsets.pagePadding()) else Modifier),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onCancel) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-            }
-            Text("从教务系统导入", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        }
-
         if (adapter == null) {
             Column(
                 Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(pageInsets.pagePadding()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 SectionFrame(containerAlpha = 0.60f) {
@@ -118,17 +118,22 @@ fun EduImportScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text("选择学校", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(value = schoolQuery, onValueChange = { schoolQuery = it },
+                            label = { Text("搜索学校") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Text("预置学校登录地址，课表获取情况取决于学校系统。也可使用下方自定义地址。",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            KNOWN_SCHOOLS.forEach { school ->
+                            KNOWN_SCHOOLS.filter { it.name.contains(schoolQuery.trim(), ignoreCase = true) }.forEach { school ->
                                 SchoolButton(
                                     name = school.name,
                                     onClick = { adapter = school }
                                 )
                             }
                         }
+                        if (KNOWN_SCHOOLS.none { it.name.contains(schoolQuery.trim(), ignoreCase = true) }) Text("未找到学校，可在下方填写登录地址或使用粘贴导入")
                     }
                 }
 
@@ -175,6 +180,7 @@ fun EduImportScreen(
                         }
                     }
                 }
+                FilledTonalButton(onClick = onPaste, modifier = Modifier.fillMaxWidth()) { Text("改用粘贴导入") }
             }
         } else {
             val school = adapter!!
@@ -273,8 +279,9 @@ fun EduImportScreen(
                                     clearWebSession()
                                     onDone(result, school.name)
                                 }
-                            } catch (e: Exception) {
-                                message = "导入失败，请确认登录状态和网络后重试"
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) {
+                                message = EduImportFailure.message(e)
                             } finally {
                                 busy = false
                             }
@@ -293,6 +300,7 @@ fun EduImportScreen(
             }
             if (message != null) {
                 Text(message!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { clearWebSession(); onPaste() }, enabled = !busy) { Text("改用粘贴导入") }
             }
         }
     }
@@ -305,23 +313,19 @@ private fun SchoolButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(12.dp)
     val colors = MaterialTheme.colorScheme
-    Surface(
-        onClick = onClick,
-        modifier = modifier.clip(shape),
-        shape = shape,
-        color = colors.primary.copy(alpha = 0.12f),
-        contentColor = colors.primary
+    ListItemSurface(
+        material = ListItemMaterial.Inset,
+        modifier = modifier.clip(ListItemDefaults.Shape).clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
                 text = name,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.primary
             )

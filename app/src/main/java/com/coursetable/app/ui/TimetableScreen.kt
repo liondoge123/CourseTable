@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -68,6 +71,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.ui.platform.testTag
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.PeriodTime
@@ -82,6 +89,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 private val WEEKDAY_NAMES = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -90,7 +98,14 @@ private val DATE_FMT = DateTimeFormatter.ofPattern("M/d")
 private const val TIME_COL_DP = 32f
 private const val SLOT_H_DP = 62f
 private const val HEADER_H_DP = 46f
-private val FLOATING_WEEK_HEADER_INSET = 52.dp
+
+private val CapsuleArrangement = object : Arrangement.Horizontal {
+    override val spacing = 6.dp
+
+    override fun Density.arrange(totalSize: Int, sizes: IntArray, layoutDirection: LayoutDirection, outPositions: IntArray) {
+        with(Arrangement.SpaceBetween) { arrange(totalSize, sizes, layoutDirection, outPositions) }
+    }
+}
 
 @Composable
 fun TimetableScreen(
@@ -98,9 +113,10 @@ fun TimetableScreen(
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     onAtBottomChanged: (Boolean) -> Unit = {}
 ) {
-    val settings by vm.settings.collectAsState()
+    val settings = vm.latestSettings
     val courses by vm.courses.collectAsState()
     val timetables by vm.timetables.collectAsState()
+    ObserveCurrentDate(vm)
 
     val totalWeeks = settings.totalWeeks
     val displayedWeek = vm.displayedWeek()
@@ -113,8 +129,10 @@ fun TimetableScreen(
     )
     var showWeekPicker by remember { mutableStateOf(false) }
 
-    LaunchedEffect(pagerState.currentPage) {
-        vm.setWeek(pagerState.currentPage + 1)
+    LaunchedEffect(pagerState) {
+        // The ViewModel owns initialization. A pager created before Room loads
+        // must not write its initial placeholder page back over the real week.
+        snapshotFlow { pagerState.settledPage }.drop(1).collect { page -> vm.setWeek(page + 1) }
     }
 
     LaunchedEffect(displayedWeek, totalWeeks) {
@@ -124,39 +142,7 @@ fun TimetableScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .topChromeGlassBackdropSource()
-        ) {
-            // Supply colour in the initial header spacer; after scrolling, the grid
-            // itself moves through this area and becomes the sampled glass backdrop.
-            LiquidAmbientBackground(Modifier.fillMaxSize())
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) { page ->
-                val week = page + 1
-                val visible = remember(courses, settings.showNonCurrentWeek, vm.weekFilter, week) {
-                    rememberCourses(settings, courses, week, vm.weekFilter)
-                }
-                TimetableGrid(
-                    topContentPadding = FLOATING_WEEK_HEADER_INSET,
-                    bottomContentPadding = bottomContentPadding,
-                    settings = settings,
-                    semesterStart = settings.semesterStart,
-                    displayedWeek = week,
-                    visible = visible,
-                    isTimeTodayColumn = todayWeek == week,
-                    todayDay = LocalDate.now().dayOfWeek.value,
-                    onCourseTap = { vm.showDetail(it) },
-                    onCellTap = { day, section -> vm.openCellEditor(day, section) },
-                    onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null
-                )
-            }
-        }
-
+    LiquidScrollablePage(topBarPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), floatingTopBar = true, topBar = {
         WeekHeader(
             todayWeek = todayWeek,
             displayedWeek = displayedWeek,
@@ -179,6 +165,32 @@ fun TimetableScreen(
                 vm.setFilter(next)
             }
         )
+    }) { pageInsets ->
+            val direction = LocalLayoutDirection.current
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize().padding(
+                    start = pageInsets.calculateStartPadding(direction), end = pageInsets.calculateEndPadding(direction)
+                )
+            ) { page ->
+                val week = page + 1
+                val visible = remember(courses, settings.showNonCurrentWeek, vm.weekFilter, week) {
+                    rememberCourses(settings, courses, week, vm.weekFilter)
+                }
+                TimetableGrid(
+                    topContentPadding = pageInsets.calculateTopPadding(),
+                    bottomContentPadding = bottomContentPadding + pageInsets.calculateBottomPadding(),
+                    settings = settings,
+                    semesterStart = settings.semesterStart,
+                    displayedWeek = week,
+                    visible = visible,
+                    isTimeTodayColumn = todayWeek == week,
+                    todayDay = vm.today.dayOfWeek.value,
+                    onCourseTap = { vm.showDetail(it) },
+                    onCellTap = { day, section -> vm.openCellEditor(day, section) },
+                    onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null
+                )
+            }
     }
 
     if (showWeekPicker) {
@@ -244,16 +256,20 @@ private fun WeekHeader(
     filter: WeekFilter,
     onCycleFilter: () -> Unit
 ) {
-    Row(
+    BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .testTag("timetable-week-controls")
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // 左侧微胶囊组：多课表切换 + 当前周次主胶囊
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+        val singleRowWidth = if (timetables.size > 1) 336.dp else 252.dp
+        val columns = if (maxWidth < singleRowWidth * fontScale) 2 else 4
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = CapsuleArrangement,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            maxItemsInEachRow = columns
         ) {
             if (timetables.size > 1) {
                 TimetableSelector(timetables, activeTimetableId, onSwitchTimetable)
@@ -263,15 +279,6 @@ private fun WeekHeader(
                 isTodayWeek = displayedWeek == todayWeek,
                 onClick = onTitleClick
             )
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // 右侧微胶囊组：单双周筛选 + 连体翻周按键 [ < │ > ]
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
             FilterCycleButton(filter = filter, onClick = onCycleFilter)
             WeekNavigationPill(
                 canPrev = canPrev,
@@ -299,7 +306,7 @@ private fun WeekPickerChip(
         Row(
             Modifier
                 .fillMaxHeight()
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isTodayWeek) {
@@ -313,15 +320,15 @@ private fun WeekPickerChip(
             }
             Text(
                 text = "第 $displayedWeek 周",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelLarge,
                 color = if (isTodayWeek) colors.primary else colors.onSurface,
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false
             )
             Spacer(Modifier.width(4.dp))
             Text(
                 text = "▾",
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelLarge,
                 color = colors.onSurfaceVariant
             )
         }
@@ -350,22 +357,22 @@ private fun TimetableSelector(
             Row(
                 Modifier
                     .fillMaxHeight()
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = active?.name ?: "课表",
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 68.dp)
+                    modifier = Modifier.widthIn(max = 60.dp)
                 )
-                Spacer(Modifier.width(3.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = "▾",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = colors.onSurfaceVariant
                 )
             }
@@ -417,7 +424,7 @@ private fun FilterCycleButton(filter: WeekFilter, onClick: () -> Unit) {
         Row(
             Modifier
                 .fillMaxHeight()
-                .padding(horizontal = 11.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -430,9 +437,10 @@ private fun FilterCycleButton(filter: WeekFilter, onClick: () -> Unit) {
             Spacer(Modifier.width(4.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = if (isFiltered) colors.primary else colors.onSurfaceVariant
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isFiltered) colors.primary else colors.onSurface,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -588,6 +596,7 @@ private fun TimetableGrid(
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
+                .testTag("timetable-scroll")
                 .padding(horizontal = 8.dp)
                 .clip(viewportShape)
                 .verticalScroll(vScroll)
@@ -612,44 +621,29 @@ private fun TimetableGrid(
                         val hh = headerH.toPx()
                         val sh = slotH.toPx()
                         val dw = (size.width - tw) / 7f
-                        val line = 1.dp.toPx()
 
                         if (highlightToday) {
                             val x = tw + (todayDay - 1) * dw
                             drawRect(todayColBg, topLeft = Offset(x, 0f), size = Size(dw, hh + sh * slots))
                         }
-                        // 仅保留表头下方一条分隔线
-                        drawLine(lineColor, Offset(0f, hh), Offset(size.width, hh), line)
+                        drawLine(lineColor, Offset(0f, hh), Offset(size.width, hh), 1.dp.toPx())
                     }
             ) {
-                Row(
-                    Modifier
-                        .width(gridW)
-                        .height(headerH)
-                ) {
+                Row(Modifier.width(gridW).height(headerH).testTag("timetable-weekdays")) {
                     Spacer(Modifier.size(timeColW, headerH))
                     repeat(7) { dayIndex ->
                         val day = dayIndex + 1
-                        val isToday = highlightToday && day == todayDay
                         val date = runCatching {
                             WeekUtils.dateOfWeek(semesterStart, displayedWeek, day).format(DATE_FMT)
                         }.getOrDefault("")
-                        Box(
-                            Modifier
-                                .width(dayW)
-                                .height(headerH),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            TimetableDayHeader(
-                                label = WEEKDAY_NAMES[dayIndex],
-                                date = date,
-                                isToday = isToday,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                        TimetableDayHeader(
+                            label = WEEKDAY_NAMES[dayIndex],
+                            date = date,
+                            isToday = highlightToday && day == todayDay,
+                            modifier = Modifier.width(dayW).height(headerH)
+                        )
                     }
                 }
-
                 Box(
                     Modifier
                         .offset(y = headerH)
@@ -915,7 +909,7 @@ private fun CourseDetailDialog(
                 if (isNonCurrentWeek) {
                     Spacer(Modifier.width(8.dp))
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
+                        shape = LiquidButtonShape,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
                     ) {
                         Text(
@@ -930,7 +924,7 @@ private fun CourseDetailDialog(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            SectionFrame(Modifier.padding(horizontal = 20.dp), containerAlpha = 0.20f) {
+            ListItemSurface(Modifier.padding(horizontal = 20.dp), material = ListItemMaterial.Inset, shape = ListItemDefaults.GroupShape) {
                 Column(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -978,13 +972,8 @@ private fun DetailRow(
     value: String
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(Modifier.width(10.dp))
+        ListItemIcon(icon)
+        Spacer(Modifier.width(ListItemDefaults.IconGap))
         Text(
             text = label,
             modifier = Modifier.width(40.dp),
@@ -993,6 +982,7 @@ private fun DetailRow(
         )
         Text(
             text = value.ifBlank { "未填写" },
+            modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium
         )
     }

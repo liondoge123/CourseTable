@@ -45,15 +45,19 @@ internal fun TimetableDayHeader(
                 Spacer(Modifier.height(2.dp))
                 Box(
                     Modifier
-                        .size(26.dp)
+                        .height(26.dp)
+                        .widthIn(min = 26.dp)
                         .clip(CircleShape)
-                        .background(if (isToday) LiquidTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent),
+                        .background(if (isToday) LiquidTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .padding(horizontal = 3.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = date,
                         fontSize = 10.sp,
                         lineHeight = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
                         color = if (isToday) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.onSurfaceVariant
                     )
@@ -88,6 +92,13 @@ internal fun TimetablePeriodLabel(
     }
 }
 
+/** Shared opaque color for active-course metadata and its editor preview. */
+@Composable
+internal fun courseMetadataColor(): Color {
+    val colors = LiquidTheme.colorScheme
+    return lerp(colors.onSurfaceVariant, colors.onSurface, if (colors.isDark) 0.35f else 0.15f)
+}
+
 /** Shared course-card presentation used by the normal timetable and import preview. */
 @Composable
 internal fun TimetableCourseCardSurface(
@@ -110,6 +121,10 @@ internal fun TimetableCourseCardSurface(
         lerp(LiquidTheme.colorScheme.surface, accent, if (isDark) 0.28f else 0.16f)
     }
     val textAlpha = if (dimmed) 0.58f else 1f
+    val metadataColor = courseMetadataColor()
+    val teacherColor = if (dimmed) LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f * textAlpha) else metadataColor
+    val locationColor = if (dimmed) LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.84f * textAlpha) else metadataColor
+    val metadataWeight = if (dimmed) FontWeight.Normal else FontWeight.Medium
     val hasMeta = teacher.isNotBlank() || location.isNotBlank()
     val nameMaxLines = when {
         duration >= 3 -> 6
@@ -156,8 +171,16 @@ internal fun TimetableCourseCardSurface(
                 maxLines = nameMaxLines,
                 overflow = TextOverflow.Ellipsis
             )
-            if (teacher.isNotBlank()) Text(teacher, color = LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f * textAlpha), fontSize = 10.sp, lineHeight = 11.sp, textAlign = textAlignment, maxLines = if (duration == 1) 1 else 2, overflow = TextOverflow.Ellipsis)
-            if (location.isNotBlank()) Text(location, color = LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.84f * textAlpha), fontSize = 10.sp, lineHeight = 11.sp, textAlign = textAlignment, maxLines = if (duration == 1) 1 else 3, overflow = TextOverflow.Ellipsis)
+            if (teacher.isNotBlank()) Text(
+                teacher, color = teacherColor, fontWeight = metadataWeight,
+                fontSize = 10.sp, lineHeight = 11.sp, textAlign = textAlignment,
+                maxLines = if (duration == 1) 1 else 2, overflow = TextOverflow.Ellipsis
+            )
+            if (location.isNotBlank()) Text(
+                location, color = locationColor, fontWeight = metadataWeight,
+                fontSize = 10.sp, lineHeight = 11.sp, textAlign = textAlignment,
+                maxLines = if (duration == 1) 1 else 3, overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

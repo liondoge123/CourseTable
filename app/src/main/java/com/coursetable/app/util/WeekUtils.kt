@@ -5,10 +5,10 @@ import java.time.temporal.ChronoUnit
 
 object WeekUtils {
 
-    /** 计算 date 相对学期开始日期是第几周（第 1 周起，可为负数） */
+    /** 以开学日所在的周一至周日为第 1 周；之前的周次可为零或负数。 */
     fun weekOf(semesterStart: LocalDate, date: LocalDate): Int {
-        val days = ChronoUnit.DAYS.between(semesterStart, date)
-        return (days / 7).toInt() + 1
+        val days = ChronoUnit.DAYS.between(weekStartDate(semesterStart, 1), date)
+        return Math.floorDiv(days, 7L).toInt() + 1
     }
 
     fun clampWeek(week: Int, totalWeeks: Int): Int = week.coerceIn(1, totalWeeks)

@@ -41,13 +41,12 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     var latestSettings by mutableStateOf(AppSettings())
         private set
 
-    init {
-        viewModelScope.launch {
-            settings.collect { latestSettings = it }
-        }
-    }
+    var today by mutableStateOf(LocalDate.now())
+        private set
 
-    var currentWeek by mutableIntStateOf(1)
+    var currentWeek by mutableIntStateOf(WeekUtils.clampWeek(
+        WeekUtils.weekOf(latestSettings.semesterStart, today), latestSettings.totalWeeks
+    ))
         private set
 
     var weekFilter by mutableStateOf(WeekFilter.ALL)
@@ -62,21 +61,28 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     var editorOpen by mutableStateOf(false)
         private set
 
-    private var initialized = false
-    private var initializedTimetableId: Long? = null
-
-    fun todayWeekNumber(): Int = WeekUtils.clampWeek(
-        WeekUtils.weekOf(latestSettings.semesterStart, LocalDate.now()),
-        latestSettings.totalWeeks
-    )
-
-    fun displayedWeek(): Int {
-        if (!initialized || initializedTimetableId != latestSettings.timetableId) {
-            initialized = true
-            initializedTimetableId = latestSettings.timetableId
-            currentWeek = todayWeekNumber()
+    init {
+        viewModelScope.launch {
+            settings.collect { updated ->
+                val semesterChanged = updated.timetableId != latestSettings.timetableId ||
+                    updated.semesterStart != latestSettings.semesterStart
+                latestSettings = updated
+                setWeek(if (semesterChanged) todayWeekNumber() else currentWeek)
+            }
         }
-        return currentWeek.coerceIn(1, latestSettings.totalWeeks)
+    }
+
+    // Keep the actual week outside the semester range so it cannot mark an
+    // unrelated date in the first/last page as today. Only navigation is clamped.
+    fun todayWeekNumber(): Int = WeekUtils.weekOf(latestSettings.semesterStart, today)
+
+    fun displayedWeek(): Int = WeekUtils.clampWeek(currentWeek, latestSettings.totalWeeks)
+
+    fun refreshDate(date: LocalDate = LocalDate.now()) {
+        if (date == today) return
+        val wasFollowingToday = currentWeek == WeekUtils.clampWeek(todayWeekNumber(), latestSettings.totalWeeks)
+        today = date
+        if (wasFollowingToday) resetWeek()
     }
 
     fun shiftWeek(delta: Int) {
@@ -131,13 +137,15 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     }
 
     fun saveCourse(course: Course) {
-        viewModelScope.launch {
+        viewModelScope.launch { saveCourseAwait(course) }
+    }
+
+    suspend fun saveCourseAwait(course: Course) {
             val withTable = if (course.timetableId == 0L) {
-                course.copy(timetableId = latestSettings.timetableId)
+                course.copy(timetableId = latestSettings.timetableId).also { it.additionalSessions = course.additionalSessions; it.reviewedSnapshot = course.reviewedSnapshot }
             } else course
             courseRepo.save(withTable)
             closeEditor()
-        }
     }
 
     fun deleteCourse(course: Course) {

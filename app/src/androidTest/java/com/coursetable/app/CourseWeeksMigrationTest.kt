@@ -29,7 +29,7 @@ class CourseWeeksMigrationTest {
                     old.version = 2
                 }
                 val database = Room.databaseBuilder(context, AppDatabase::class.java, name)
-                    .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
+                    .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
                 try {
                     val legacy = database.courseDao().byId(1)!!
                     assertEquals("", legacy.selectedWeeksCsv)
@@ -58,7 +58,7 @@ class CourseWeeksMigrationTest {
                     old.version = 3
                 }
                 val database = Room.databaseBuilder(context, AppDatabase::class.java, name)
-                    .addMigrations(AppDatabase.MIGRATION_3_4).build()
+                    .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
                 try {
                     val table = database.timetableDao().byId(1)!!
                     assertNull(table.periodSchemeId)
