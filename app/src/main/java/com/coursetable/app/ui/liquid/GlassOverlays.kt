@@ -2,11 +2,15 @@ package com.coursetable.app.ui.liquid
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -24,15 +28,19 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.CornerRadius
@@ -53,6 +61,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -75,6 +84,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,16 +97,28 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.theme.LiquidTheme
@@ -139,6 +161,7 @@ fun ModalBottomSheet(
     containerColor: Color = Color.Unspecified,
     shape: Shape = RoundedRectangle(32.dp),
     canDismiss: () -> Boolean = { true },
+    preferReadability: Boolean = false,
     content: @Composable () -> Unit
 ) {
     var drag by remember { mutableFloatStateOf(0f) }
@@ -264,7 +287,8 @@ fun ModalBottomSheet(
                         shape = shape,
                         baseColor = containerColor.takeUnless { it == Color.Unspecified },
                         shadowElevation = 24.dp,
-                        style = OverlayGlassStyle.SHEET
+                        style = OverlayGlassStyle.SHEET,
+                        preferReadability = preferReadability
                     ) {
                         // Keep the sheet frame anchored when the IME opens. Full-height
                         // editors handle keyboard avoidance inside their own fixed bounds.
@@ -412,22 +436,46 @@ fun AlertDialog(
                             dampingRatio = Spring.DampingRatioLowBouncy,
                             stiffness = Spring.StiffnessMediumLow
                         )
-                    ) + fadeIn(tween(200, easing = LinearOutSlowInEasing)),
+                    ),
                     exit = if (back.completed) ExitTransition.None else scaleOut(
                         targetScale = 0.92f,
                         animationSpec = tween(180, easing = FastOutSlowInEasing)
-                    ) + fadeOut(tween(160, easing = FastOutSlowInEasing))
+                    )
                 ) {
+                    val opacity = dialogOpacity(back.completed)
                     if (pageTransitionKey != null) {
-                        DialogTransitionSurface(page)
+                        DialogTransitionSurface(page, opacity)
                     } else {
-                        DialogPageSurface(page)
+                        DialogPageSurface(page, opacity)
                     }
                 }
             }
         }
     }
 }
+}
+
+/** Keep glass/shadow render layers alive at entrance without a rectangular group-alpha buffer. */
+@Composable
+private fun AnimatedVisibilityScope.dialogOpacity(backCompleted: Boolean): Modifier {
+    val opacity by transition.animateFloat(
+        transitionSpec = {
+            if (backCompleted) snap()
+            else if (targetState == EnterExitState.Visible) tween(200, easing = LinearOutSlowInEasing)
+            else tween(160, easing = FastOutSlowInEasing)
+        },
+        label = "DialogMaterialOpacity"
+    ) { state ->
+        when (state) {
+            EnterExitState.PreEnter -> 0.01f
+            EnterExitState.Visible -> 1f
+            EnterExitState.PostExit -> 0f
+        }
+    }
+    return Modifier.graphicsLayer {
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+        alpha = opacity
+    }
 }
 
 private data class DialogPagePresentation(
@@ -444,8 +492,8 @@ private data class DialogPagePresentation(
 )
 
 @Composable
-private fun DialogTransitionSurface(page: DialogPagePresentation) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+private fun DialogTransitionSurface(page: DialogPagePresentation, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val editorHeight = maxHeight * 0.855f
         val targetOffset = if (page.fixedEditorFrame) -maxHeight * 0.0225f else 0.dp
@@ -493,7 +541,8 @@ private fun DialogTransitionSurface(page: DialogPagePresentation) {
             shape = RectangleShape,
             shadowElevation = 0.dp,
             style = OverlayGlassStyle.DIALOG,
-            refractionEnabled = false
+            refractionEnabled = false,
+            preferReadability = page.fixedEditorFrame
         ) { }
         AnimatedContent(
             modifier = Modifier.align(Alignment.TopCenter).width(cardWidth)
@@ -516,19 +565,21 @@ private fun DialogTransitionSurface(page: DialogPagePresentation) {
             contentAlignment = Alignment.TopCenter,
             label = "DialogPageTransition"
         ) { presentedPage ->
-            DialogPageBody(presentedPage, if (presentedPage.fixedEditorFrame) Modifier.fillMaxWidth().height(editorHeight)
-                else Modifier.wrapContentHeight(unbounded = true).heightIn(max = maxHeight)
-                    .onSizeChanged { listHeightPx = it.height })
+            CompositionLocalProvider(LocalReadableOverlayGlass provides presentedPage.fixedEditorFrame) {
+                DialogPageBody(presentedPage, if (presentedPage.fixedEditorFrame) Modifier.fillMaxWidth().height(editorHeight)
+                    else Modifier.wrapContentHeight(unbounded = true).heightIn(max = maxHeight)
+                        .onSizeChanged { listHeightPx = it.height })
+            }
         }
     }
 }
 @Composable
-private fun DialogPageSurface(page: DialogPagePresentation) {
+private fun DialogPageSurface(page: DialogPagePresentation, modifier: Modifier = Modifier) {
     with(page) {
         // Reserve the previous frame height to preserve its top position,
         // while shortening only the visible card at the bottom.
         BoxWithConstraints(
-            if (fixedEditorFrame) Modifier.fillMaxHeight(0.9f) else Modifier
+            modifier.then(if (fixedEditorFrame) Modifier.fillMaxHeight(0.9f) else Modifier)
         ) {
             OverlayGlassSurface(
                 modifier = Modifier
@@ -545,7 +596,8 @@ private fun DialogPageSurface(page: DialogPagePresentation) {
                 style = OverlayGlassStyle.DIALOG,
                 // Large editing frames retain frosted glass without the extra
                 // full-surface lens pass during keyboard/layout updates.
-                refractionEnabled = !fixedEditorFrame
+                refractionEnabled = !fixedEditorFrame,
+                preferReadability = fixedEditorFrame
             ) {
                 DialogPageBody(page, if (fixedEditorFrame) Modifier.fillMaxSize() else Modifier)
             }
@@ -939,14 +991,14 @@ fun NumberWheelPickerDialog(
                             dampingRatio = Spring.DampingRatioLowBouncy,
                             stiffness = Spring.StiffnessMediumLow
                         )
-                    ) + fadeIn(tween(200, easing = LinearOutSlowInEasing)),
+                    ),
                     exit = if (back.completed) ExitTransition.None else scaleOut(
                         targetScale = 0.92f,
                         animationSpec = tween(180, easing = FastOutSlowInEasing)
-                    ) + fadeOut(tween(160, easing = FastOutSlowInEasing))
+                    )
                 ) {
                     OverlayGlassSurface(
-                        modifier = Modifier
+                        modifier = dialogOpacity(back.completed)
                             .widthIn(max = 480.dp)
                             .fillMaxWidth()
                             .imePadding()
@@ -1013,7 +1065,7 @@ fun NumberWheelPickerDialog(
     }
 }
 
-internal enum class DropdownMenuAlignment { START, END }
+internal enum class DropdownMenuAlignment { START, CENTER, END }
 
 internal fun calculateAnchoredMenuPosition(
     rootSize: IntSize,
@@ -1021,25 +1073,62 @@ internal fun calculateAnchoredMenuPosition(
     anchorBounds: Rect,
     alignment: DropdownMenuAlignment,
     safeMarginPx: Int,
-    gapPx: Int
+    overlapAnchor: Boolean = true,
+    gapPx: Int = 0
 ): IntOffset {
     val maxX = (rootSize.width - safeMarginPx - menuSize.width).coerceAtLeast(safeMarginPx)
     val desiredX = when (alignment) {
         DropdownMenuAlignment.START -> anchorBounds.left.roundToInt()
+        DropdownMenuAlignment.CENTER -> (anchorBounds.center.x - menuSize.width / 2f).roundToInt()
         DropdownMenuAlignment.END -> anchorBounds.right.roundToInt() - menuSize.width
     }
     val x = desiredX.coerceIn(safeMarginPx, maxX)
 
-    val belowY = anchorBounds.bottom.roundToInt() + gapPx
-    val aboveY = anchorBounds.top.roundToInt() - gapPx - menuSize.height
+    val belowY = if (overlapAnchor) anchorBounds.top.roundToInt() else anchorBounds.bottom.roundToInt() + gapPx
+    val aboveY = if (overlapAnchor) anchorBounds.bottom.roundToInt() - menuSize.height else anchorBounds.top.roundToInt() - menuSize.height - gapPx
     val maxY = (rootSize.height - safeMarginPx - menuSize.height).coerceAtLeast(safeMarginPx)
     val y = when {
         belowY + menuSize.height <= rootSize.height - safeMarginPx -> belowY
         aboveY >= safeMarginPx -> aboveY
-        rootSize.height - anchorBounds.bottom >= anchorBounds.top -> belowY.coerceIn(safeMarginPx, maxY)
+        rootSize.height - anchorBounds.top >= anchorBounds.bottom -> belowY.coerceIn(safeMarginPx, maxY)
         else -> aboveY.coerceIn(safeMarginPx, maxY)
     }
-    return IntOffset(x, y)
+    return IntOffset(x, y.coerceIn(safeMarginPx, maxY))
+}
+
+internal data class AnchoredMenuMorphFrame(
+    val scaleX: Float, val scaleY: Float, val translation: Offset, val cornerRadius: CornerRadius
+)
+
+/** Morph the actual trigger rectangle into the final menu, rather than uniformly zooming a popup. */
+internal fun anchoredMenuMorphFrame(menuPosition: IntOffset, menuSize: Size, source: Rect,
+    progress: Float, targetRadius: Float,
+    horizontalProgress: Float = progress, verticalProgress: Float = progress,
+    anchorToVerticalEdge: Boolean = false): AnchoredMenuMorphFrame {
+    val sourceX = source.width.coerceAtLeast(1f) / menuSize.width.coerceAtLeast(1f)
+    val sourceY = source.height.coerceAtLeast(1f) / menuSize.height.coerceAtLeast(1f)
+    val scaleX = (sourceX + (1f - sourceX) * progress).coerceAtLeast(0.001f)
+    val scaleY = (sourceY + (1f - sourceY) * progress).coerceAtLeast(0.001f)
+    val sourceRadius = minOf(source.width, source.height).coerceAtLeast(0f) / 2f
+    val radius = sourceRadius + (targetRadius - sourceRadius) * progress.coerceIn(0f, 1f)
+    val centerX = source.center.x + (menuPosition.x + menuSize.width / 2f - source.center.x) * horizontalProgress
+    val centerY = source.center.y + (menuPosition.y + menuSize.height / 2f - source.center.y) * verticalProgress
+    val currentHeight = menuSize.height * scaleY
+    val top = if (anchorToVerticalEdge) {
+        val targetBottom = menuPosition.y + menuSize.height
+        if (targetBottom <= source.top) {
+            source.bottom + (targetBottom - source.bottom) * progress - currentHeight
+        } else source.top + (menuPosition.y - source.top) * progress
+    } else centerY - currentHeight / 2f
+    return AnchoredMenuMorphFrame(scaleX, scaleY,
+        Offset(centerX - menuSize.width * scaleX / 2f - menuPosition.x,
+            top - menuPosition.y),
+        CornerRadius(radius / scaleX, radius / scaleY))
+}
+
+private data class MenuContentClip(val bounds: Rect, val radius: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rounded(RoundRect(bounds, CornerRadius(radius)))
 }
 
 @Composable
@@ -1050,13 +1139,18 @@ internal fun DropdownMenu(
     alignment: DropdownMenuAlignment = DropdownMenuAlignment.START,
     modifier: Modifier = Modifier,
     onClosed: () -> Unit = {},
+    sourceContent: GraphicsLayer? = null,
+    onSourceCovered: () -> Unit = {},
+    onSourceRestored: ((Float) -> Unit)? = null,
+    overlapAnchor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val visibility = remember { MutableTransitionState(false) }
     var wasExpanded by remember { mutableStateOf(false) }
+    var surfaceReady by remember { mutableStateOf(false) }
     LaunchedEffect(expanded) {
         if (expanded) wasExpanded = true
-        visibility.targetState = expanded
+        else visibility.targetState = false
     }
     LaunchedEffect(visibility.currentState, visibility.isIdle, expanded) {
         if (wasExpanded && !expanded && visibility.isIdle && !visibility.currentState) {
@@ -1069,21 +1163,12 @@ internal fun DropdownMenu(
     if (!mounted || anchor == null) return
     val density = androidx.compose.ui.platform.LocalDensity.current
     val safeMarginPx = with(density) { 12.dp.roundToPx() }
-    val gapPx = with(density) { 8.dp.roundToPx() }
-    val rootHeightPx = with(density) {
-        androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx()
-    }
-    val opensDown = anchor.center.y <= rootHeightPx / 2f
-    val transformOrigin = TransformOrigin(
-        pivotFractionX = if (alignment == DropdownMenuAlignment.START) 0f else 1f,
-        pivotFractionY = if (opensDown) 0f else 1f
-    )
     GlassOverlayPortal(OverlayDestination.MENU) {
         val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
             onBack = onDismissRequest
         )
-        Box(
+        BoxWithConstraints(
             Modifier
                 .fillMaxSize()
                 .clickable(
@@ -1092,60 +1177,148 @@ internal fun DropdownMenu(
                     onClick = onDismissRequest
                 )
         ) {
-            Layout(
+            val menuRootSize = IntSize(constraints.maxWidth, constraints.maxHeight)
+            LaunchedEffect(expanded, surfaceReady) {
+                visibility.targetState = expanded && surfaceReady
+            }
+            if (expanded && !surfaceReady) {
+                // Prepare the collapsed surface before starting the visibility transition.
+                // Keep the real trigger visible through this first draw.
+                OverlayGlassSurface(
+                    modifier = Modifier.offset { IntOffset(anchor.left.roundToInt(), anchor.top.roundToInt()) }
+                        .size(with(density) { anchor.width.toDp() }, with(density) { anchor.height.toDp() })
+                        .graphicsLayer { alpha = 0.01f }
+                        .drawWithContent {
+                            drawContent()
+                            surfaceReady = true
+                        },
+                    shape = RoundedRectangle(with(density) { (minOf(anchor.width, anchor.height) / 2f).toDp() }),
+                    shadowElevation = 16.dp,
+                    style = OverlayGlassStyle.MENU
+                ) { Box(Modifier.fillMaxSize()) }
+            }
+            AnimatedVisibility(
+                visibleState = visibility,
                 modifier = Modifier.fillMaxSize(),
-                content = {
-                    AnimatedVisibility(
-                        visibleState = visibility,
-                        modifier = Modifier.predictiveBackTransform(back, BackPresentation.MENU, transformOrigin),
-                        enter = scaleIn(
-                            initialScale = 0.94f,
-                            transformOrigin = transformOrigin,
-                            animationSpec = tween(190, easing = LinearOutSlowInEasing)
-                        ) + fadeIn(tween(130, easing = LinearOutSlowInEasing)),
-                        exit = if (back.completed) ExitTransition.None else scaleOut(
-                            targetScale = 0.96f,
-                            transformOrigin = transformOrigin,
-                            animationSpec = tween(160, easing = FastOutSlowInEasing)
-                        ) + fadeOut(tween(120, easing = FastOutSlowInEasing))
-                    ) {
+                enter = EnterTransition.None,
+                exit = ExitTransition.None
+            ) {
+                var sourceCovered by remember { mutableStateOf(false) }
+                // Separate travel, growth and legibility, but share a lifecycle so interrupted
+                // gestures retain their pose/velocity and onClosed waits for every channel.
+                val menuExpansion by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) spring(dampingRatio = 0.7f, stiffness = 180f, visibilityThreshold = 0.001f)
+                        else if (back.completed) snap() else spring(dampingRatio = 1f, stiffness = 900f, visibilityThreshold = 0.001f)
+                    }, label = "anchored-menu-expansion"
+                ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+                val horizontalTravel by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) spring(dampingRatio = 0.8f, stiffness = 170f, visibilityThreshold = 0.001f)
+                        else if (back.completed) snap() else spring(dampingRatio = 1f, stiffness = 1250f, visibilityThreshold = 0.001f)
+                    }, label = "anchored-menu-horizontal-travel"
+                ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+                val verticalTravel by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) spring(dampingRatio = 0.88f, stiffness = 340f, visibilityThreshold = 0.001f)
+                        else if (back.completed) snap() else spring(dampingRatio = 1f, stiffness = 850f, visibilityThreshold = 0.001f)
+                    }, label = "anchored-menu-vertical-travel"
+                ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+                val contentReveal by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) tween(230, delayMillis = 45, easing = LinearOutSlowInEasing)
+                        else if (back.completed) snap() else tween(110, easing = FastOutSlowInEasing)
+                    }, label = "anchored-menu-content"
+                ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+                val contentScale by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) tween(275, easing = LinearOutSlowInEasing)
+                        else if (back.completed) snap() else tween(140, easing = FastOutSlowInEasing)
+                    }, label = "anchored-menu-content-scale"
+                ) { state -> when (state) {
+                    EnterExitState.PreEnter -> 0.92f
+                    EnterExitState.Visible -> 1f
+                    EnterExitState.PostExit -> 0.82f
+                } }
+                val backFactor = (1f - 0.1f * backPreviewProgress(back.progress)) * (1f - back.exitProgress)
+                val progress = menuExpansion * backFactor
+                val reveal = contentReveal.coerceIn(0f, 1f) * (1f - back.exitProgress)
+                // A glass-backed trigger must crossfade its surface with the menu at both
+                // ends. Restoring it only in onClosed leaves a bare-text frame in between.
+                val blendsSourceSurface = onSourceRestored != null
+                val sourceRestoration = if (blendsSourceSurface) ((0.18f - progress) / 0.18f).coerceIn(0f, 1f) else 0f
+                SideEffect { onSourceRestored?.invoke(sourceRestoration) }
+                val sourceRadius = minOf(anchor.width, anchor.height) / 2f
+                val radius = sourceRadius + (with(density) { 24.dp.toPx() } - sourceRadius) * progress.coerceIn(0f, 1f)
+                val menuShape = RoundedRectangle(with(density) { radius.toDp() })
+                Layout(
+                    modifier = Modifier.fillMaxSize(),
+                    content = {
                         OverlayGlassSurface(
-                            modifier = modifier
-                                .widthIn(min = 152.dp, max = 184.dp)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = {}
-                                ),
-                            shape = RoundedRectangle(24.dp),
+                            modifier = modifier.testTag("anchored-menu-surface")
+                                .clickable(interactionSource = remember { MutableInteractionSource() },
+                                    indication = null, onClick = {}),
+                            shape = menuShape,
                             shadowElevation = 16.dp,
                             style = OverlayGlassStyle.MENU
-                        ) {
-                            Column(
-                                Modifier
-                                    .heightIn(max = 320.dp)
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(vertical = 2.dp)
-                            ) { content() }
+                        ) { Box(Modifier.fillMaxSize()) }
+                        Column(
+                            Modifier.widthIn(min = 144.dp, max = 176.dp).width(IntrinsicSize.Max)
+                                .heightIn(max = 320.dp).verticalScroll(rememberScrollState()).padding(4.dp)
+                                .graphicsLayer {
+                                    alpha = reveal
+                                    scaleX = contentScale
+                                    scaleY = contentScale
+                                    val blur = with(density) { 4.dp.toPx() } * (1f - reveal)
+                                    renderEffect = if (blur > 0.05f) BlurEffect(blur, blur, TileMode.Decal) else null
+                                }
+                        ) { content() }
+                        Canvas(Modifier.testTag("anchored-menu-source")) {
+                            sourceContent?.let { source ->
+                                translate((size.width - source.size.width) / 2f, (size.height - source.size.height) / 2f) {
+                                    drawLayer(source)
+                                }
+                                // Leave the real control visible until its replacement has
+                                // actually drawn, including a cold first opening.
+                                if (!sourceCovered && source.size.width > 0 && source.size.height > 0) {
+                                    sourceCovered = true
+                                    onSourceCovered()
+                                }
+                            }
                         }
                     }
-                }
-            ) { measurables, constraints ->
-                val rootSize = IntSize(constraints.maxWidth, constraints.maxHeight)
-                val placeable = measurables.singleOrNull()?.measure(
-                    constraints.copy(minWidth = 0, minHeight = 0)
-                )
-                layout(rootSize.width, rootSize.height) {
-                    if (placeable != null) {
-                        val position = calculateAnchoredMenuPosition(
-                            rootSize = rootSize,
-                            menuSize = IntSize(placeable.width, placeable.height),
-                            anchorBounds = anchor,
-                            alignment = alignment,
-                            safeMarginPx = safeMarginPx,
-                            gapPx = gapPx
-                        )
-                        placeable.place(position.x, position.y)
+                ) { measurables, constraints ->
+                    // Measure once at the final size; the labels never reflow during the morph.
+                    val labels = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+                    val finalSize = IntSize(labels.width, labels.height)
+                    val position = calculateAnchoredMenuPosition(menuRootSize, finalSize, anchor,
+                        alignment, safeMarginPx, overlapAnchor,
+                        gapPx = with(density) { 4.dp.roundToPx() })
+                    val frame = anchoredMenuMorphFrame(position,
+                        Size(labels.width.toFloat(), labels.height.toFloat()), anchor, progress, with(density) { 24.dp.toPx() },
+                        horizontalTravel * backFactor, verticalTravel * backFactor,
+                        anchorToVerticalEdge = alignment == DropdownMenuAlignment.CENTER)
+                    val width = (labels.width * frame.scaleX).roundToInt().coerceAtLeast(1)
+                    val height = (labels.height * frame.scaleY).roundToInt().coerceAtLeast(1)
+                    val glass = measurables[0].measure(Constraints.fixed(width, height))
+                    val source = measurables[2].measure(Constraints.fixed(anchor.width.roundToInt().coerceAtLeast(1), anchor.height.roundToInt().coerceAtLeast(1)))
+                    layout(constraints.maxWidth, constraints.maxHeight) {
+                        val x = position.x + frame.translation.x.roundToInt()
+                        val y = position.y + frame.translation.y.roundToInt()
+                        glass.placeWithLayer(x, y) {
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
+                            alpha = if (blendsSourceSurface) 1f - sourceRestoration
+                                else (progress * 10f).coerceIn(0f, 1f)
+                        }
+                        val contentLeft = (labels.width - width) / 2f
+                        val contentTop = (labels.height - height) / 2f
+                        labels.placeWithLayer(x - contentLeft.roundToInt(), y - contentTop.roundToInt()) {
+                            clip = true
+                            shape = MenuContentClip(Rect(contentLeft, contentTop, contentLeft + width, contentTop + height), radius)
+                        }
+                        source.placeWithLayer(x + (width - source.width) / 2, y + (height - source.height) / 2) {
+                            alpha = ((0.45f - progress) / 0.45f).coerceIn(0f, 1f) * (1f - sourceRestoration)
+                        }
                     }
                 }
             }
@@ -1225,32 +1398,31 @@ private fun LibraryDialogAction(
 fun DropdownMenuItem(
     text: @Composable () -> Unit,
     onClick: () -> Unit,
-    selected: Boolean = false
+    selected: Boolean? = null,
+    modifier: Modifier = Modifier
 ) {
     val colors = LiquidTheme.colorScheme
-    val contentColor = if (selected) colors.primary else colors.onSurface
-    CompositionLocalProvider(LocalContentColor provides contentColor) {
+    CompositionLocalProvider(LocalContentColor provides colors.onSurface) {
         Row(
-            Modifier
+            modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp)
-                .listItemSurface(ListItemMaterial.Inset, selected = selected, bordered = selected)
-                .semantics { this.selected = selected }
-                .defaultMinSize(minWidth = 140.dp, minHeight = 48.dp)
-                .clickable(onClick = onClick)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .defaultMinSize(minWidth = 128.dp, minHeight = 48.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .then(if (selected == null) Modifier.clickable(role = Role.Button, onClick = onClick)
+                    else Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(Modifier.weight(1f)) { text() }
-            if (selected) {
+            if (selected == true) {
                 Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "当前课表",
-                    modifier = Modifier.size(20.dp),
-                    tint = colors.primary
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).testTag("dropdown-selection-indicator"),
+                    tint = colors.onSurface
                 )
-            }
+            } else if (selected != null) Spacer(Modifier.size(18.dp))
         }
     }
 }

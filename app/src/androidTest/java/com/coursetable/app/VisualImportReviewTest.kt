@@ -290,7 +290,21 @@ class VisualImportReviewTest {
                 CourseTableTheme { VisualImportReview(session, AppSettings(), records, { records = it; current = it }, {}, {}, {}, {}) }
             }
             compose.onNodeWithText("开始校对").performClick()
-            compose.onNodeWithText("删除").performClick()
+            compose.onNodeWithTag("course-editor-delete").assertIsDisplayed()
+            val evidenceSession = androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("editorEvidenceSession")
+            fun captureDeleteEvidence(name: String) {
+                if (evidenceSession == null) return
+                require(evidenceSession.matches(Regex("[a-zA-Z0-9-]+")))
+                compose.onRoot().captureToImage()
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(
+                        "screencap -p /data/local/tmp/coursetable-testing/$evidenceSession/$name.png"
+                    )
+                ).use { it.readBytes() }
+            }
+            captureDeleteEvidence("import-before-delete")
+            compose.onNodeWithTag("course-editor-delete").performClick()
+            captureDeleteEvidence("import-after-delete")
             compose.waitUntil(5000) { compose.onAllNodesWithContentDescription("保存").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("保存").performClick()
             compose.runOnIdle { assertEquals("b", current.single().draftId); assertFalse(current.single().needsReview) }

@@ -67,6 +67,25 @@ class CourseWeeksDialogTest {
         compose.onNodeWithTag("course-weeks-dialog").assertDoesNotExist()
     }
 
+    @Test fun allWeeksToggleClearsThenRestoresAndFillsPartialSelection() {
+        show(total = 3, initial = listOf(1, 2, 3))
+        compose.onNodeWithTag("weeks-preset-全选").assertIsOn().performClick()
+        (1..3).forEach { compose.onNodeWithTag("course-week-$it").assertIsOff() }
+        compose.onNodeWithTag("weeks-preset-全选").assertIsOff()
+        compose.onNodeWithTag("course-weeks-confirm").assertIsNotEnabled()
+        compose.onNodeWithText("请至少选择一周").assertIsDisplayed()
+
+        compose.onNodeWithTag("course-week-2").performClick()
+        compose.onNodeWithTag("weeks-preset-全选").performClick()
+        (1..3).forEach { compose.onNodeWithTag("course-week-$it").assertIsOn() }
+        compose.onNodeWithTag("weeks-preset-全选").assertIsOn().performClick()
+        compose.onNodeWithTag("course-weeks-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("weeks-preset-全选").performClick()
+        compose.onNodeWithTag("course-weeks-confirm").assertIsEnabled().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(1, 2, 3), saved)
+    }
+
     @Test fun emptySelectionDisablesConfirmAndSingleWeekDisablesEvenPreset() {
         show(total = 1, initial = listOf(1))
         compose.onNodeWithTag("weeks-preset-双周").assertIsNotEnabled()

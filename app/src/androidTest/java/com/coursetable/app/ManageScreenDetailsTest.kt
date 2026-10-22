@@ -77,9 +77,10 @@ class ManageScreenDetailsTest {
             compose.onNodeWithText("周五 · 第9节").assertIsDisplayed()
             compose.onNodeWithText("实验楼 B502", substring = true).assertIsDisplayed()
             val title = compose.onNodeWithText(first.name, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            val delete = compose.onNodeWithContentDescription("删除").assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
-                .fetchSemanticsNode().boundsInRoot
-            assertTrue("Long title must not overlap its delete target", title.right <= delete.left)
+            val row = compose.onNodeWithTag("managed-course-${first.id}").fetchSemanticsNode().boundsInRoot
+            assertTrue("The title must remain inside the course row", title.right <= row.right)
+            compose.onNodeWithContentDescription("课程「${first.name}」的更多操作").assertDoesNotExist()
+            compose.onNodeWithContentDescription("删除").assertDoesNotExist()
             capture("courses-large-${theme.key}")
         }
     }
@@ -118,6 +119,27 @@ class ManageScreenDetailsTest {
         })
     }
 
+    @Test fun timetableSelectionKeepsItsSizeAndFeedbackCoversTheWholeRow() {
+        val activeId = mutableStateOf(1L)
+        val tables = listOf(Timetable(1, "主课表"), Timetable(2, "实验课"))
+        show { TimetableManageScreen(tables, activeId.value, {}, { activeId.value = it }, {}, { _, _ -> }, {}) }
+        compose.onNodeWithText("当前课表").assertDoesNotExist()
+        val before = compose.onNodeWithTag("timetable-card-2").getUnclippedBoundsInRoot()
+        compose.onNodeWithTag("timetable-select-2").performClick().assertIsSelected()
+        val after = compose.onNodeWithTag("timetable-card-2").getUnclippedBoundsInRoot()
+        assertEquals(before, after)
+        assertEquals(after, compose.onNodeWithTag("timetable-select-2").getUnclippedBoundsInRoot())
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("timetable-select-2").performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(250)
+        capture("timetable-full-row-pressed")
+        compose.onNodeWithTag("timetable-select-2").performTouchInput { up() }
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithContentDescription("课表「实验课」的更多操作").performClick()
+        compose.onNodeWithText("重命名").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(2L, activeId.value) }
+    }
+
     @Test fun timetableSelectionAndActionsStaySeparateAtLargeFont() {
         val mode = mutableStateOf(ThemeMode.LIGHT)
         val tables = listOf(Timetable(1, "2026–2027 学年第一学期 · 计算机科学与技术专业"), Timetable(2, "实验课与选修课"))
@@ -134,19 +156,24 @@ class ManageScreenDetailsTest {
         capture("timetables-large-light")
         compose.runOnIdle { mode.value = ThemeMode.DARK }
         capture("timetables-large-dark")
-        compose.onNodeWithContentDescription("重命名「${tables[0].name}」").performClick()
+        compose.onNodeWithContentDescription("课表「${tables[0].name}」的更多操作").performClick()
+        compose.onNodeWithText("重命名").performClick()
         compose.onNodeWithTag("timetable-name-input").performTextReplacement("重命名后的课表")
         compose.onNodeWithText("确定").performClick()
+        // Confirmation commits after the dialog's exit, beyond the button's click frame.
+        compose.waitUntil(timeoutMillis = 3000) { renamed != null }
         compose.runOnIdle {
             assertEquals(1L to "重命名后的课表", renamed)
             assertEquals(0, switches)
         }
         compose.onNodeWithTag("timetables-list").performScrollToNode(hasTestTag("timetable-select-2"))
         compose.onNodeWithTag("timetable-select-2").performClick().assertIsSelected()
-        compose.onNodeWithContentDescription("删除课表「${tables[1].name}」").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("课表「${tables[1].name}」的更多操作").performScrollTo().performClick()
+        compose.onNodeWithText("删除课表").performClick()
         compose.onNodeWithText("取消").performClick()
         compose.runOnIdle { assertNull(deleted); assertEquals(1, switches) }
-        compose.onNodeWithContentDescription("删除课表「${tables[1].name}」").performClick()
+        compose.onNodeWithContentDescription("课表「${tables[1].name}」的更多操作").performClick()
+        compose.onNodeWithText("删除课表").performClick()
         compose.onNodeWithText("删除", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals(tables[1], deleted); assertEquals(1, switches) }
     }
@@ -155,7 +182,10 @@ class ManageScreenDetailsTest {
         val tables = mutableStateOf(listOf(Timetable(1, "唯一课表")))
         var switched: Long? = null
         show { TimetableManageScreen(tables.value, 1, {}, { switched = it }, {}, { _, _ -> }, {}) }
-        compose.onNodeWithContentDescription("无法删除唯一课表").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("课表「唯一课表」的更多操作").performClick()
+        compose.onNodeWithText("删除课表").assertDoesNotExist()
+        compose.onNodeWithText("重命名").performClick()
+        compose.onNodeWithText("取消").performClick()
         compose.runOnIdle { tables.value = (1L..100L).map { Timetable(it, "课表$it") } }
         compose.onNodeWithTag("timetable-card-100").assertDoesNotExist()
         compose.onNodeWithTag("timetables-list").performScrollToNode(hasTestTag("timetable-select-100"))

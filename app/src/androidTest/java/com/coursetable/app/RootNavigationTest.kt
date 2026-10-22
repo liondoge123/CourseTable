@@ -1,10 +1,16 @@
 package com.coursetable.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.performSemanticsAction
@@ -67,8 +73,25 @@ class RootNavigationTest {
         }
         composeRule.onNodeWithContentDescription("返回").assertIsDisplayed()
         swipeBack(cancel = false)
-        composeRule.onNodeWithText("课程安排、提醒、外观与数据").assertIsDisplayed()
+        composeRule.onNodeWithText("学期与课表").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("返回").assertDoesNotExist()
+    }
+
+    @Test fun periodTimesUsesASettingsSubpageAndSupportsCancelledBack() {
+        composeRule.onAllNodesWithText("设置")[0].performClick()
+        composeRule.onNodeWithText("节次时间").performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.onNodeWithTag("period-times-page").assertIsDisplayed()
+        composeRule.onNodeWithTag("overlay-glass-dialog").assertDoesNotExist()
+        swipeBack(cancel = true)
+        composeRule.onNodeWithTag("period-times-page").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("新建方案").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("scheme-name-input").assertIsDisplayed()
+        composeRule.onNodeWithText("取消").performClick()
+        composeRule.onNodeWithTag("period-times-page").assertIsDisplayed()
+        swipeBack(cancel = false)
+        composeRule.onNodeWithTag("period-times-page").assertDoesNotExist()
+        composeRule.onNodeWithText("学期与课表").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun eduImportReturnsToRetainedImportHub() {
@@ -90,10 +113,27 @@ class RootNavigationTest {
         composeRule.onNodeWithText("课程数据导入").assertIsDisplayed()
 
         composeRule.onAllNodesWithText("设置")[0].performClick()
-        composeRule.onNodeWithText("课程安排、提醒、外观与数据").assertIsDisplayed()
+        composeRule.onNodeWithText("学期与课表").assertIsDisplayed()
 
         composeRule.onAllNodesWithText("课表")[0].performClick()
         composeRule.onAllNodesWithText("课表", useUnmergedTree = true)[0].assertIsDisplayed()
+    }
+
+    @Test fun swipingRootPagesUpdatesTheDockAndKeepsSettingsSubpagesIsolated() {
+        composeRule.onAllNodesWithText("导入")[0].performClick()
+        composeRule.onNodeWithTag("root-pager").performTouchInput { swipeLeft() }
+        composeRule.onAllNodes(hasText("设置") and isSelected())[0].assertIsDisplayed()
+        composeRule.onNodeWithText("学期与课表").assertIsDisplayed()
+        composeRule.onNodeWithText("课表管理").performClick()
+        composeRule.onNodeWithTag("timetable-manage-page").performTouchInput { swipeLeft() }
+        composeRule.onNodeWithTag("timetable-manage-page").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("返回").performClick()
+        composeRule.onNodeWithTag("root-pager").performTouchInput { swipeRight() }
+        composeRule.onAllNodes(hasText("导入") and isSelected())[0].assertIsDisplayed()
+        composeRule.onNodeWithText("课程数据导入").assertIsDisplayed()
+        composeRule.onAllNodesWithText("学期与课表").assertCountEquals(0)
+        composeRule.onNodeWithTag("root-pager").performTouchInput { swipeRight() }
+        composeRule.onAllNodes(hasText("课程") and isSelected())[0].assertIsDisplayed()
     }
 
     @Test
@@ -161,7 +201,7 @@ class RootNavigationTest {
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithTag("about-page").fetchSemanticsNodes().isEmpty()
         }
-        composeRule.onNodeWithText("课程安排、提醒、外观与数据").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("学期与课表").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("about-page").assertDoesNotExist()
     }
 }

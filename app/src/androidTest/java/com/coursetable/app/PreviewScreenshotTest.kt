@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.ThemeMode
+import com.coursetable.app.ui.theme.toArgbLong
 import org.junit.Assert.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -51,6 +52,14 @@ class PreviewScreenshotTest {
         compose.onNodeWithText("效果预览").assertIsDisplayed()
         compose.onNodeWithTag("course-editor-pinned-source", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("课程颜色", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        val cells = com.coursetable.app.ui.theme.CourseColorPalette.map {
+            compose.onNodeWithTag("course-color-${it.toArgbLong()}")
+                .getUnclippedBoundsInRoot()
+        }
+        assertEquals(12, cells.size)
+        cells.take(6).forEach { assertEquals(cells[0].top, it.top) }
+        cells.drop(6).forEach { assertEquals(cells[6].top, it.top) }
+        assertTrue(cells[6].top > cells[0].top)
     }
 
     @Test fun circularProgressIndicatorRotates() {

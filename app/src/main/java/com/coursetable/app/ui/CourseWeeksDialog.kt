@@ -77,7 +77,7 @@ internal fun CourseWeeksDialog(
         onDismissRequest = onDismiss,
         title = {
             Text("选择上课周次", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                style = LiquidTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                style = LiquidTheme.typography.titleMedium)
         },
         text = {
             Column(Modifier.fillMaxWidth().testTag("course-weeks-dialog"),
@@ -85,9 +85,12 @@ internal fun CourseWeeksDialog(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("全选" to allWeeks, "单周" to allWeeks.filter { it % 2 == 1 },
                         "双周" to allWeeks.filter { it % 2 == 0 }).forEach { (label, weeks) ->
-                        WeekSelectionButton(label, selected.toSet() == weeks.toSet() && weeks.isNotEmpty(),
+                        val active = selected.toSet() == weeks.toSet() && weeks.isNotEmpty()
+                        WeekSelectionButton(label, active,
                             Modifier.weight(1f).heightIn(min = 48.dp).testTag("weeks-preset-$label"),
-                            enabled = weeks.isNotEmpty()) { selected = weeks }
+                            enabled = weeks.isNotEmpty()) {
+                            selected = if (label == "全选" && active) emptyList() else weeks
+                        }
                     }
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 360.dp)) {
@@ -140,15 +143,19 @@ internal fun CourseWeeksDialog(
                 }
                 Text(if (selected.isEmpty()) "请至少选择一周" else "已选 ${selected.size} 周",
                     modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                    style = LiquidTheme.typography.bodySmall,
+                    style = LiquidTheme.typography.bodyMedium,
                     color = if (selected.isEmpty()) LiquidTheme.colorScheme.error else LiquidTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
             TextButton(onClick = { onConfirm(selected.sorted()); onDismiss() }, enabled = selected.isNotEmpty(),
-                modifier = Modifier.testTag("course-weeks-confirm")) { Text("确定") }
+                modifier = Modifier.testTag("course-weeks-confirm")) {
+                Text("确定", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) {
+            Text("取消", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        } }
     )
 }
 
@@ -169,7 +176,8 @@ private fun WeekSelectionButton(
         contentAlignment = Alignment.Center) {
         Box((if (compact) Modifier.size(40.dp) else Modifier.fillMaxWidth().height(40.dp))
             .clip(CircleShape).background(background), contentAlignment = Alignment.Center) {
-            Text(label, style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+            Text(label, style = if (compact) LiquidTheme.typography.bodyLarge else LiquidTheme.typography.bodyMedium,
+                fontWeight = if (compact) FontWeight.Normal else FontWeight.Medium,
                 color = foreground.copy(alpha = if (enabled) 1f else 0.38f), textAlign = TextAlign.Center)
         }
     }

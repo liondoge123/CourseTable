@@ -130,14 +130,13 @@ class SettingsRepository(
     }
 
     suspend fun savePeriodTimeScheme(scheme: PeriodTimeScheme) {
-        require(!scheme.isDefault) { "默认方案请在默认时间编辑中保存" }
-        val normalized = scheme.copy(name = scheme.name.trim())
+        val normalized = scheme.copy(name = if (scheme.isDefault) PeriodTimeScheme.DEFAULT_NAME else scheme.name.trim())
         require(PeriodTimeScheme.decode(PeriodTimeScheme.encode(listOf(normalized))) == listOf(normalized)) {
             "时间方案不合法"
         }
         preferences.edit { prefs ->
             val schemes = PeriodTimeScheme.decode(prefs[Keys.PERIOD_TIME_SCHEMES])
-            require(schemes.none { it.id != normalized.id && it.name == normalized.name }) {
+            require(normalized.isDefault || schemes.none { it.id != normalized.id && it.name == normalized.name }) {
                 "已有同名时间方案"
             }
             val updated = if (schemes.any { it.id == scheme.id }) {

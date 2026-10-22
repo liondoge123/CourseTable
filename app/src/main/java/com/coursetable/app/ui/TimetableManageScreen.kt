@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,10 +54,10 @@ fun TimetableManageScreen(
         }
     }) { pageInsets ->
         LazyColumn(Modifier.fillMaxSize().selectableGroup().testTag("timetables-list"), contentPadding = pageInsets.pagePadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            verticalArrangement = Arrangement.spacedBy(ManagementListDefaults.Gap)) {
             item(key = "summary") {
                 Text(
-                    "共 ${timetables.size} 个课表 · 点按切换当前课表",
+                    "${timetables.size} 个课表",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -70,16 +71,6 @@ fun TimetableManageScreen(
                     onRename = { renameTarget = table },
                     onDelete = { timetableToDelete = table }
                 )
-            }
-            item(key = "create") {
-                Button(
-                    onClick = { showCreate = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("新建课表")
-                }
             }
         }
     }
@@ -155,57 +146,42 @@ private fun TimetableCard(
 ) {
     val colors = MaterialTheme.colorScheme
     ListItemSurface(
-        modifier = Modifier.fillMaxWidth().testTag("timetable-card-${table.id}"),
-        selected = isActive
+        modifier = Modifier.fillMaxWidth().testTag("timetable-card-${table.id}")
     ) {
-        Column {
+        Row(
+            Modifier.fillMaxWidth()
+                .selectable(selected = isActive, role = Role.RadioButton, onClick = onSwitch)
+                .testTag("timetable-select-${table.id}"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Row(
-                Modifier.fillMaxWidth()
-                    .selectable(selected = isActive, role = Role.RadioButton, onClick = onSwitch)
-                    .testTag("timetable-select-${table.id}")
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.Top
+                Modifier.weight(1f)
+                    .heightIn(min = ManagementListDefaults.MinHeight)
+                    .padding(ManagementListDefaults.ContentPadding),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                ListItemIcon(
-                    if (isActive) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                    modifier = Modifier.padding(top = 2.dp),
-                    tint = if (isActive) colors.primary else colors.onSurfaceVariant
-                )
-                Spacer(Modifier.size(12.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ListChoiceIndicator(isActive)
+                Spacer(Modifier.size(ManagementListDefaults.IndicatorGap))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(ManagementListDefaults.TextGap)) {
                     Text(table.name, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "${table.semesterStart().format(DateTimeFormatter.ISO_LOCAL_DATE)} 开学 · " +
-                            "${table.totalWeeks} 周 · ${table.periods().size} 节",
+                        "${table.semesterStart().format(DateTimeFormatter.ISO_LOCAL_DATE)} 开学",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant
+                    )
+                    Text(
+                        "${table.totalWeeks} 周 · 每天 ${table.periods().size} 节",
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant
                     )
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().padding(start = ListItemDefaults.TextInset, end = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isActive) {
-                    Text(
-                        "当前课表",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.primary
-                    )
-                } else Spacer(Modifier.weight(1f))
-                IconButton(onClick = onRename) {
-                    Icon(Icons.Filled.Edit, "重命名「${table.name}」", Modifier.size(18.dp), tint = colors.onSurfaceVariant)
-                }
-                IconButton(onClick = onDelete, enabled = canDelete) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        if (canDelete) "删除课表「${table.name}」" else "无法删除唯一课表",
-                        Modifier.size(18.dp),
-                        tint = if (canDelete) colors.error else colors.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-                }
-            }
+            ItemActionsMenu(
+                description = "课表「${table.name}」的更多操作",
+                modifier = Modifier.padding(end = ManagementListDefaults.TrailingPadding),
+                actions = listOf(ItemMenuAction("重命名", onRename)) +
+                    if (canDelete) listOf(ItemMenuAction("删除课表", onDelete, destructive = true)) else emptyList()
+            )
         }
     }
 }

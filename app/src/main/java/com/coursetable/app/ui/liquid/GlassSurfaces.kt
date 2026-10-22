@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.util.lerp
@@ -40,6 +41,8 @@ import kotlin.math.sin
 import kotlin.math.tanh
 
 internal enum class OverlayGlassStyle { SHEET, DIALOG, MENU }
+
+internal val LocalReadableOverlayGlass = staticCompositionLocalOf { false }
 
 @Composable
 fun GlassSurface(
@@ -114,6 +117,7 @@ internal fun OverlayGlassSurface(
     shadowElevation: Dp = 20.dp,
     style: OverlayGlassStyle = OverlayGlassStyle.DIALOG,
     refractionEnabled: Boolean = true,
+    preferReadability: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val backdrop = LocalOverlayGlassBackdrop.current ?: LocalGlassBackdrop.current
@@ -126,7 +130,7 @@ internal fun OverlayGlassSurface(
         OverlayGlassStyle.DIALOG -> if (isLightTheme) 0.26f else 0.23f
         OverlayGlassStyle.MENU -> if (isLightTheme) 0.30f else 0.26f
     }
-    val blurRadius = when (style) {
+    val blurRadius = if (preferReadability) 40.dp else when (style) {
         OverlayGlassStyle.SHEET -> 32.dp
         OverlayGlassStyle.DIALOG -> 22.dp
         OverlayGlassStyle.MENU -> 18.dp
@@ -147,7 +151,7 @@ internal fun OverlayGlassSurface(
     val fallbackTint = requestedTint.copy(alpha = if (isLightTheme) 0.86f else 0.88f)
     val fallbackSheen = Color.White.copy(alpha = if (isLightTheme) 0.34f else 0.09f)
 
-    // A single readable liquid-glass material for dialogs, sheets and menus.
+    // Dense editors soften background detail without adding tint or borders.
     val surfaceModifier = if (backdrop != null && capability != GlassCapability.STATIC) {
         modifier
             .drawBackdrop(
@@ -155,11 +159,11 @@ internal fun OverlayGlassSurface(
                 shape = { shape },
                 effects = {
                     colorControls(
-                        brightness = if (isLightTheme) 0.035f else 0f,
-                        saturation = if (isLightTheme) 1.18f else 1.12f
+                        brightness = if (isLightTheme && !preferReadability) 0.035f else 0f,
+                        saturation = if (preferReadability) 1f else if (isLightTheme) 1.18f else 1.12f
                     )
                     blur(blurRadius.toPx())
-                    if (refractionEnabled && capability == GlassCapability.FULL && style != OverlayGlassStyle.SHEET) {
+                    if (refractionEnabled && !preferReadability && capability == GlassCapability.FULL && style != OverlayGlassStyle.SHEET) {
                         lens(
                             refractionHeight = refractionHeight.toPx(),
                             refractionAmount = refractionAmount.toPx(),
@@ -212,7 +216,10 @@ internal fun OverlayGlassSurface(
             )
     }
 
-    CompositionLocalProvider(LocalContentColor provides contentColor) {
+    CompositionLocalProvider(
+        LocalContentColor provides contentColor,
+        LocalReadableOverlayGlass provides preferReadability
+    ) {
         Box(surfaceModifier.testTag("overlay-glass-${style.name.lowercase()}")) {
             if (style == OverlayGlassStyle.SHEET && backdrop != null && capability != GlassCapability.STATIC) {
                 val edgeColor = requestedTint.copy(alpha = if (isLightTheme) 0.88f else 0.78f)

@@ -69,6 +69,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -342,7 +343,7 @@ private fun WeekPickerChip(
 }
 
 @Composable
-private fun TimetableSelector(
+internal fun TimetableSelector(
     timetables: List<com.coursetable.app.data.Timetable>,
     activeId: Long,
     onSwitch: (Long) -> Unit,
@@ -350,6 +351,10 @@ private fun TimetableSelector(
     horizontalPadding: androidx.compose.ui.unit.Dp = 10.dp
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var triggerHidden by remember { mutableStateOf(false) }
+    var sourceRestoration by remember { mutableStateOf(0f) }
+    val menuSource = rememberMenuSource()
+    var pendingSwitch by remember { mutableStateOf<Long?>(null) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val active = timetables.firstOrNull { it.id == activeId } ?: timetables.firstOrNull()
     val colors = MaterialTheme.colorScheme
@@ -358,6 +363,11 @@ private fun TimetableSelector(
         LiquidCapsuleSurface(
             modifier = Modifier
                 .height(36.dp)
+                .graphicsLayer {
+                    // Preserve the lens and shadow bounds while fading the real capsule back.
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    alpha = if (triggerHidden) sourceRestoration else 1f
+                }
                 .onGloballyPositioned { anchorBounds = it.boundsInRoot() },
             onClick = { expanded = true },
             preferTopChromeBackdrop = true
@@ -365,7 +375,8 @@ private fun TimetableSelector(
             Row(
                 Modifier
                     .fillMaxHeight()
-                    .padding(horizontal = horizontalPadding),
+                    .padding(horizontal = horizontalPadding)
+                    .captureMenuSource(menuSource, triggerHidden),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -389,19 +400,24 @@ private fun TimetableSelector(
             expanded = expanded,
             onDismissRequest = { expanded = false },
             anchorBounds = anchorBounds,
-            alignment = DropdownMenuAlignment.START
+            alignment = DropdownMenuAlignment.START,
+            sourceContent = menuSource,
+            onSourceCovered = { triggerHidden = true },
+            onSourceRestored = { sourceRestoration = it },
+            onClosed = {
+                triggerHidden = false
+                pendingSwitch?.let(onSwitch)
+                pendingSwitch = null
+            }
         ) {
             timetables.forEach { table ->
                 DropdownMenuItem(
                     text = {
-                        Text(
-                            table.name,
-                            fontWeight = if (table.id == activeId) FontWeight.Bold else FontWeight.Normal
-                        )
+                        Text(table.name)
                     },
                     onClick = {
                         expanded = false
-                        onSwitch(table.id)
+                        pendingSwitch = table.id
                     },
                     selected = table.id == activeId
                 )
@@ -872,7 +888,7 @@ private fun WeekPickerDialog(
 }
 
 @Composable
-private fun CourseDetailDialog(
+internal fun CourseDetailDialog(
     course: Course,
     isNonCurrentWeek: Boolean = false,
     onDismiss: () -> Unit,
@@ -880,13 +896,9 @@ private fun CourseDetailDialog(
     onDelete: () -> Unit
 ) {
     val cardColor = Color.fromStoredLong(course.color)
-    var deleteArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(deleteArmed) {
-        if (deleteArmed) {
-            kotlinx.coroutines.delay(5_000)
-            deleteArmed = false
-        }
-    }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    if (showDeleteConfirm) DeleteConfirmationDialog("删除此时段？", "删除「${course.name}」的当前上课时段？",
+        onDismiss = { showDeleteConfirm = false }, onConfirm = { showDeleteConfirm = false; onDelete() })
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -960,12 +972,10 @@ private fun CourseDetailDialog(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                InlineDeleteAction(
-                    armed = deleteArmed,
-                    onArm = { deleteArmed = true },
-                    onConfirm = onDelete,
-                    compact = false
-                )
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Filled.Delete, "删除当前时段", Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.weight(1f))
                 Button(onClick = onEdit) {
                     Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))

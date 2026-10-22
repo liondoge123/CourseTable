@@ -22,8 +22,7 @@ fun OptionChip(
     onClick: () -> Unit,
     label: String,
     modifier: Modifier = Modifier,
-    large: Boolean = false,
-    outlined: Boolean = true
+    large: Boolean = false
 ) {
     val shape = remember(large) { RoundedCornerShape(if (large) 12.dp else 10.dp) }
     val colors = LiquidTheme.colorScheme
@@ -31,7 +30,7 @@ fun OptionChip(
 
     Box(
         modifier = modifier
-            .listItemSurface(ListItemMaterial.Inset, selected, shape, bordered = outlined)
+            .listItemSurface(ListItemMaterial.Inset, selected, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = if (large) 10.dp else 6.dp, vertical = if (large) 8.dp else 4.dp),
         contentAlignment = Alignment.Center

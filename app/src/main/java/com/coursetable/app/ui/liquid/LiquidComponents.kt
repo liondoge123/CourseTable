@@ -239,7 +239,6 @@ private fun LiquidButton(
                 .defaultMinSize(minHeight = 48.dp)
                 .clip(shape)
                 .background(background)
-                .then(if (kind == ButtonKind.Outline) Modifier.border(1.dp, colors.outlineVariant, shape) else Modifier)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .padding(contentPadding),
             horizontalArrangement = Arrangement.Center,

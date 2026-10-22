@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -51,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.scheduledWeeks
 import com.coursetable.app.data.withScheduledWeeks
@@ -183,6 +183,25 @@ fun CourseEditorDialog(
         text = { Text("当前课程有尚未保存的修改。") },
         confirmButton = { TextButton(onClick = { discardChanges = false; save() }, enabled = name.isNotBlank()) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("放弃修改") } })
+    val deleteAction: @Composable () -> Unit = {
+        if (onDelete != null) {
+            val deleteLabel = if (saveLabel == null) "删除整门课程" else "删除当前记录"
+            TextButton(
+                onClick = {
+                    if (saveLabel == null) deleteCourseConfirm = true else onDelete()
+                },
+                enabled = !saving && loaded,
+                modifier = Modifier.fillMaxWidth().testTag("course-editor-delete")
+                    .clip(LiquidButtonShape)
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.08f))
+            ) {
+                val deleteColor = MaterialTheme.colorScheme.error.copy(alpha = if (!saving && loaded) 1f else 0.38f)
+                Icon(Icons.Filled.Delete, deleteLabel, Modifier.size(20.dp), tint = deleteColor)
+                Spacer(Modifier.width(8.dp))
+                Text(deleteLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = deleteColor)
+            }
+        }
+    }
     val editorContent: @Composable () -> Unit = { EndInputOnOutsideTap { endInputModifier ->
         Column(
             Modifier
@@ -197,18 +216,17 @@ fun CourseEditorDialog(
         ) {
             val canSave = name.isNotBlank() && selectedWeeks.isNotEmpty() && !saving && loaded
 
-            // 单行一体化顶部操作栏（左侧✕、中间居中标题、右侧对称✓）
-            Box(
+            Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
                     onClick = { requestDismiss() },
                     enabled = !saving,
                     modifier = Modifier
-                        .size(40.dp)
-                        .align(Alignment.CenterStart),
+                        .size(48.dp),
                     colors = IconButtonDefaults.iconButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -220,17 +238,17 @@ fun CourseEditorDialog(
                 Text(
                     text = title ?: if (course.id == 0L) "添加课程" else "编辑课程",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.align(Alignment.Center)
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-
                 IconButton(
                     onClick = ::save,
                     enabled = canSave,
                     modifier = Modifier
-                        .size(40.dp)
-                        .align(Alignment.CenterEnd),
+                        .size(48.dp),
                     colors = IconButtonDefaults.iconButtonColors(
                         containerColor = if (canSave) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
                         contentColor = if (canSave) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
@@ -281,11 +299,11 @@ fun CourseEditorDialog(
 
                 // 模块 1: 基本信息
                 EditorSectionCard(icon = Icons.Filled.Edit, title = "基本信息") {
-                    if (name.isBlank() && reviewHints.any { "名称" in it }) Text("请补齐课程名称", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    if (name.isBlank() && reviewHints.any { "名称" in it }) Text("请补齐课程名称", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("课程名称 *") },
+                        label = { Text("课程名称 *", style = MaterialTheme.typography.bodyMedium) },
                         showUnfocusedBorder = false,
                         containerAlpha = 0.55f,
                         singleLine = true,
@@ -294,18 +312,16 @@ fun CourseEditorDialog(
                     )
                     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
-                            value = teacher, onValueChange = { teacher = it }, label = { Text("任课教师", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            value = teacher, onValueChange = { teacher = it }, label = { Text("任课教师", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             showUnfocusedBorder = false, containerAlpha = 0.55f, singleLine = true,
                             shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).fillMaxHeight().testTag("course-editor-teacher")
                         )
                         OutlinedTextField(
-                            value = location, onValueChange = { location = it }, label = { Text(if(showColorPicker) "本时段地点" else "上课地点", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            value = location, onValueChange = { location = it }, label = { Text(if(showColorPicker) "本时段地点" else "上课地点", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             showUnfocusedBorder = false, containerAlpha = 0.55f, singleLine = true,
                             shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).fillMaxHeight().testTag("course-editor-location")
                         )
                     }
-                    if (showColorPicker) Text("名称、教师和颜色应用于整门课程；地点随所选时段切换。", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 val visibleSessions = sessionDrafts.mapIndexed { index, draft ->
@@ -313,9 +329,10 @@ fun CourseEditorDialog(
                         dayOfWeek = day, startSection = startSection, duration = duration, location = location) else draft
                 }
                 val sessionFields: @Composable ColumnScope.() -> Unit = {
-                    saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    saveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                     val timeNeedsReview = !timeReviewed && reviewHints.any { "星期" in it || "节次" in it }
-                    SessionSettingRow("上课时间", if (timeNeedsReview) "" else "周${WeekdayLabels[day - 1]} · 第 $startSection–${startSection + duration - 1} 节",
+                    val sections = if (duration == 1) "第 $startSection 节" else "第 $startSection–${startSection + duration - 1} 节"
+                    SessionSettingRow("上课时间", if (timeNeedsReview) "" else "周${WeekdayLabels[day - 1]} · $sections",
                         Icons.Filled.Schedule, "course-editor-time", !saving && loaded, { showTimePicker = true }, isError = timeNeedsReview)
                     SessionSettingRow("上课周次", if (selectedWeeks.isEmpty()) "" else schedule.weeksLabel(),
                         Icons.Filled.DateRange, "course-editor-weeks", !saving && loaded, { showWeeksPicker = true }, isError = selectedWeeks.isEmpty())
@@ -334,35 +351,37 @@ fun CourseEditorDialog(
                             Triple(c, c.toArgbLong(), c.luminance() > 0.55f)
                         }
                     }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    // Six equal-width cells keep the original two-row palette on narrow editors.
+                    Column(
+                        Modifier.fillMaxWidth().testTag("course-color-grid"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        paletteItems.forEach { (paletteColor, paletteColorLong, isLight) ->
-                            val selected = paletteColorLong == color
-                            val checkColor = if (isLight) Color(0xFF1C1C1E) else Color.White
-                            Box(
-                                Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        2.dp,
-                                        if (selected) MaterialTheme.colorScheme.onSurface
-                                        else Color.Transparent,
-                                        CircleShape
-                                    )
-                                    .clickable { color = paletteColorLong },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(30.dp)
-                                        .clip(CircleShape)
-                                        .background(paletteColor),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (selected) {
-                                        Text("✓", color = checkColor, fontWeight = FontWeight.Bold)
+                        paletteItems.chunked(6).forEach { paletteRow ->
+                            Row(Modifier.fillMaxWidth()) {
+                                paletteRow.forEach { (paletteColor, paletteColorLong, isLight) ->
+                                    val selected = paletteColorLong == color
+                                    val checkColor = if (isLight) Color(0xFF1C1C1E) else Color.White
+                                    Box(
+                                        Modifier.weight(1f).height(48.dp)
+                                            .testTag("course-color-$paletteColorLong")
+                                            .clickable { color = paletteColorLong },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            Modifier.size(40.dp).border(
+                                                2.dp,
+                                                if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                                CircleShape
+                                            ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(
+                                                Modifier.size(30.dp).clip(CircleShape).background(paletteColor),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (selected) Icon(Icons.Filled.Check, null, Modifier.size(18.dp), tint = checkColor)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -370,14 +389,14 @@ fun CourseEditorDialog(
                     }
                 }
 
-                if (onDelete != null && saveLabel == null) DestructiveButton(onClick = { deleteCourseConfirm = true }, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
-                    Text("删除整门课程")
-                }
+                if (saveLabel == null) deleteAction()
                 Spacer(Modifier.height(24.dp))
             }
             if (saveLabel != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (onDelete != null) TextButton(onClick = onDelete, enabled = !saving) { Text("删除", color = MaterialTheme.colorScheme.error) }
-                Button(onClick = ::save, enabled = canSave, modifier = Modifier.weight(1f)) { Text(saveLabel) }
+                Button(onClick = ::save, enabled = canSave, modifier = Modifier.weight(1f)) { Text(saveLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium) }
+            }
+            if (saveLabel != null) Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                deleteAction()
             }
         }
     } }
@@ -424,6 +443,7 @@ fun CourseEditorDialog(
             onDismissRequest = { requestDismiss() },
             canDismiss = { if (protectEdits && changed) { requestDismiss(); false } else !saving },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            preferReadability = true,
             shape = RoundedCornerShape(32.dp)
         ) { editorContent() }
     }
@@ -447,8 +467,7 @@ private fun EditorSectionCard(
             Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
@@ -457,9 +476,10 @@ private fun EditorSectionCard(
 }
 
 /**
- * 1:1 所见即所得的课表卡片实时效果预览
+ * 课程信息与配色的实时预览，沿用编辑页的正文与辅助文字层级。
  */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun CourseCardPreview(
     name: String,
     teacher: String,
@@ -487,41 +507,39 @@ private fun CourseCardPreview(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = "效果预览",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    fontWeight = FontWeight.Medium
+                    modifier = Modifier.padding(end = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = "周$dayLabel · 第${startSection}-${startSection + duration - 1}节 · $weeksLabel",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(76.dp)
+                    .height(IntrinsicSize.Min)
+                    .heightIn(min = 76.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(cardBg.copy(alpha = 0.55f))
                     .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.CenterStart
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
                         .fillMaxHeight()
                         .width(4.dp)
                         .background(accent)
@@ -529,15 +547,15 @@ private fun CourseCardPreview(
 
                 Column(
                     modifier = Modifier
-                        .padding(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+                        .weight(1f)
+                        .padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
                         text = if (name.isBlank()) "课程名称" else name,
                         color = if (name.isBlank()) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                         else MaterialTheme.colorScheme.onSurface,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -548,16 +566,16 @@ private fun CourseCardPreview(
                         Text(
                             text = if (teacher.isBlank()) "任课教师" else teacher,
                             color = if (teacher.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) else metadataColor,
-                            fontWeight = if (teacher.isBlank()) FontWeight.Normal else FontWeight.Medium,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f, fill = false),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = if (location.isBlank()) "上课教室/地点" else location,
                             color = if (location.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) else metadataColor,
-                            fontWeight = if (location.isBlank()) FontWeight.Normal else FontWeight.Medium,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )

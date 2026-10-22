@@ -54,14 +54,48 @@ class CourseTimeDialogTest {
         assertEquals(Triple(2, 2, 3), saved)
     }
 
-    @Test fun advancingStartMovesEndAndEarlierEndMovesStart() {
+    private fun endOption(section: Int) = compose.onNode(
+        hasTestTag("第 $section 节-time-option") and hasAnyAncestor(hasTestTag("course-time-end")), useUnmergedTree = true)
+
+    @Test fun advancingStartMovesEndAndRestrictsEndOptions() {
         show()
         choose("course-time-start", 5, "第 6 节")
-        choose("course-time-end", 3, "第 4 节")
+        endOption(6).assertIsSelected()
+        compose.onNodeWithTag("course-time-end", useUnmergedTree = true).performTouchInput { swipeDown() }
+        compose.waitForIdle()
+        (1..5).forEach { endOption(it).assertDoesNotExist() }
+        endOption(6).assertIsSelected()
         choose("course-time-day", 6, "周日")
         compose.onNodeWithTag("course-time-confirm").performClick()
         compose.waitForIdle()
-        assertEquals(Triple(7, 4, 4), saved)
+        assertEquals(Triple(7, 6, 6), saved)
+    }
+
+    @Test fun changingStartPreservesLaterEndAndRestoresEarlierEndOptions() {
+        show(start = 4, end = 10)
+        choose("course-time-start", 6, "第 7 节")
+        endOption(10).assertIsSelected()
+        choose("course-time-start", 1, "第 2 节")
+        endOption(10).assertIsSelected()
+        choose("course-time-end", 1, "第 3 节")
+        endOption(3).assertIsSelected()
+        compose.onNode(hasTestTag("第 2 节-time-option") and hasAnyAncestor(hasTestTag("course-time-start")),
+            useUnmergedTree = true).assertIsSelected()
+        compose.onNodeWithTag("course-time-confirm").performClick()
+        compose.waitForIdle()
+        assertEquals(Triple(2, 2, 3), saved)
+    }
+
+    @Test fun lastStartPeriodLeavesOnlyTheSameEndPeriod() {
+        show(start = 12, end = 12)
+        endOption(12).assertIsSelected()
+        (1..11).forEach { endOption(it).assertDoesNotExist() }
+        compose.onNodeWithTag("course-time-end", useUnmergedTree = true).performTouchInput { swipeDown() }
+        compose.waitForIdle()
+        endOption(12).assertIsSelected()
+        compose.onNodeWithTag("course-time-confirm").performClick()
+        compose.waitForIdle()
+        assertEquals(Triple(2, 12, 12), saved)
     }
 
     @Test fun cancellationDoesNotCommitDraft() {
@@ -103,7 +137,7 @@ class CourseTimeDialogTest {
             }
         }
         compose.onNodeWithTag("course-editor-time").performScrollTo().performClick()
-        choose("course-time-end", 4, "第 5 节")
+        choose("course-time-end", 3, "第 5 节")
         compose.onNodeWithTag("course-time-confirm").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("course-editor-time").performClick()

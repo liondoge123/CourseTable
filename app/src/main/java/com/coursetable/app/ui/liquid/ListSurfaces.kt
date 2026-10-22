@@ -1,9 +1,8 @@
 package com.coursetable.app.ui.liquid
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -38,6 +37,15 @@ internal object ListItemDefaults {
     val TextInset = 60.dp
 }
 
+internal object ManagementListDefaults {
+    val Gap = 12.dp
+    val MinHeight = 72.dp
+    val ContentPadding = PaddingValues(start = 16.dp, end = 4.dp, top = 16.dp, bottom = 16.dp)
+    val IndicatorGap = 12.dp
+    val TextGap = 4.dp
+    val TrailingPadding = 4.dp
+}
+
 /** Decoration only: focus, gestures and selection semantics belong to the caller. */
 @Composable
 internal fun Modifier.listItemSurface(
@@ -45,7 +53,6 @@ internal fun Modifier.listItemSurface(
     selected: Boolean = false,
     shape: Shape = ListItemDefaults.Shape,
     opacity: Float = 1f,
-    bordered: Boolean = true,
     accent: Color = LiquidTheme.colorScheme.primary
 ): Modifier {
     val colors = LiquidTheme.colorScheme
@@ -54,15 +61,17 @@ internal fun Modifier.listItemSurface(
     val strength = opacity.coerceIn(0f, 1f)
     val backdrop = LocalOverlayGlassBackdrop.current ?: LocalGlassBackdrop.current
     val capability = LocalGlassCapability.current
+    val preferReadability = LocalReadableOverlayGlass.current
     var result = this.clip(shape)
     if (resolved == ListItemMaterial.Glass && backdrop != null && capability != GlassCapability.STATIC) {
         result = result.drawBackdrop(
             backdrop = backdrop,
             shape = { shape },
             effects = {
-                colorControls(brightness = if (dark) 0f else 0.035f, saturation = 1.12f)
-                blur(32.dp.toPx())
-                if (capability == GlassCapability.FULL) {
+                colorControls(brightness = if (dark || preferReadability) 0f else 0.035f,
+                    saturation = if (preferReadability) 1f else 1.12f)
+                blur((if (preferReadability) 40.dp else 32.dp).toPx())
+                if (!preferReadability && capability == GlassCapability.FULL) {
                     lens(refractionHeight = 6.dp.toPx(), refractionAmount = 8.dp.toPx(), depthEffect = true)
                 }
             },
@@ -88,15 +97,6 @@ internal fun Modifier.listItemSurface(
         listOf(Color.White.copy(alpha = alpha * strength), Color.White.copy(alpha = 0.015f * strength))
     }
     result = result.background(Brush.verticalGradient(wash))
-    if (bordered) {
-        val edge = Brush.linearGradient(listOf(
-            Color.White.copy(alpha = if (dark) 0.20f else 0.58f),
-            if (selected) accent.copy(alpha = if (dark) 0.38f else 0.25f)
-            else colors.onSurfaceVariant.copy(alpha = if (dark) 0.035f else 0.025f),
-            Color.White.copy(alpha = if (dark) 0.10f else 0.32f)
-        ))
-        result = result.border(BorderStroke(0.8.dp, edge), shape)
-    }
     return result
 }
 
@@ -133,12 +133,12 @@ internal fun ListItemIcon(
 @Composable
 internal fun ListItemChevron(modifier: Modifier = Modifier) {
     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, modifier.size(18.dp),
-        tint = LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f))
+        tint = LiquidTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
 internal fun ListChoiceIndicator(selected: Boolean, modifier: Modifier = Modifier) {
     Icon(if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
         null, modifier.size(20.dp), tint = if (selected) LiquidTheme.colorScheme.primary
-        else LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f))
+        else LiquidTheme.colorScheme.onSurfaceVariant)
 }

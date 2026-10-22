@@ -51,6 +51,8 @@ class CourseSessionsEditorTest {
     private fun evidence(name: String) {
         val session=InstrumentationRegistry.getArguments().getString("editorEvidenceSession") ?: return
         require(session.matches(Regex("[a-zA-Z0-9-]+")))
+        compose.waitForIdle()
+        compose.onRoot().captureToImage()
         val descriptor=InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("screencap -p /data/local/tmp/coursetable-testing/$session/$name.png")
         ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
     }
@@ -71,13 +73,33 @@ class CourseSessionsEditorTest {
         show()
         compose.onNodeWithTag("course-session-add").performScrollTo().performClick()
         compose.onNodeWithTag("course-session-selector").assertTextContains("时段 3 / 3")
-        compose.onNodeWithTag("course-session-remove").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("删除此时段").performScrollTo().performClick()
         compose.onNodeWithText("删除",substring=false).performClick()
         compose.onNodeWithTag("course-session-selector").assertTextContains("时段 1 / 2")
         compose.onNodeWithContentDescription("保存").performClick()
         compose.waitUntil(5000) { saved!=null }
         assertEquals(setOf("A301","B301"),(listOf(saved!!)+saved!!.additionalSessions.orEmpty()).map { it.location }.toSet())
     }
+    @Test fun courseDeletionIsBelowThePaletteAndRequiresConfirmation() {
+        var deletions = 0
+        compose.setContent { CourseTableTheme { LiquidBackdropHost(Modifier.fillMaxSize()) {
+            CourseEditorDialog(sample(), 18, 12, {}, {}, onDelete = { deletions++ })
+        } } }
+        compose.onNodeWithContentDescription("课程编辑的更多操作").assertDoesNotExist()
+        compose.onNodeWithTag("course-editor-delete").performScrollTo().assertIsDisplayed()
+        val palette = compose.onNodeWithTag("course-color-grid", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val delete = compose.onNodeWithTag("course-editor-delete").getUnclippedBoundsInRoot()
+        org.junit.Assert.assertTrue("Delete must follow the palette", delete.top >= palette.bottom)
+        evidence("editor-course-actions")
+        compose.onNodeWithTag("course-editor-delete").performClick()
+        evidence("editor-course-delete-confirm")
+        compose.onNodeWithText("取消").performClick()
+        compose.runOnIdle { assertEquals(0, deletions) }
+        compose.onNodeWithTag("course-editor-delete").performScrollTo().performClick()
+        compose.onNodeWithText("删除").performClick()
+        compose.runOnIdle { assertEquals(1, deletions) }
+    }
+
     @Test fun managementHasNoStandaloneMergeAction() {
         compose.setContent { CourseTableTheme { LiquidBackdropHost(Modifier.fillMaxSize()) {
             CourseManageScreen(listOf(sample().copy(id=1,courseId=1)),18,12,{},{},{})
@@ -86,6 +108,7 @@ class CourseSessionsEditorTest {
     }
     @Test fun lightSessionFormAndSelectionUseSharedDesign() {
         show()
+        evidence("editor-typography-light-top")
         compose.onNodeWithTag("course-session-add").performScrollTo()
         evidence("editor-light")
         compose.onNodeWithTag("course-session-selector").performScrollTo().performClick()
@@ -94,6 +117,7 @@ class CourseSessionsEditorTest {
     }
     @Test fun darkSessionFormRemainsReadable() {
         show(true)
+        evidence("editor-typography-dark-top")
         compose.onNodeWithTag("course-session-add").performScrollTo()
         compose.onNodeWithTag("course-editor-location").assertTextContains("A301")
         evidence("editor-dark")
@@ -155,7 +179,7 @@ class CourseSessionsEditorTest {
         compose.onNodeWithTag("course-session-selector").assertDoesNotExist()
         compose.onNodeWithTag("course-session-add").performScrollTo().performClick()
         compose.onNodeWithTag("course-session-selector").assertTextContains("时段 2 / 2")
-        compose.onNodeWithTag("course-session-remove").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("删除此时段").performScrollTo().performClick()
         compose.onNodeWithText("删除").performClick()
         compose.onNodeWithTag("course-session-selector").assertDoesNotExist()
         compose.onNodeWithTag("course-editor-location").performScrollTo().assertTextContains("A301")
@@ -167,6 +191,10 @@ class CourseSessionsEditorTest {
                 location = "第二实验教学楼 B502（东校区综合实验室）"))
         }
         show(dark, course, fontScale = 1.5f)
+        compose.onNodeWithTag("course-editor-name").assertIsDisplayed()
+        compose.onNodeWithTag("course-editor-teacher").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("course-editor-location").assertIsDisplayed()
+        evidence(if (dark) "editor-large-dark-form" else "editor-large-light-form")
         compose.onNodeWithTag("course-session-selector").performScrollTo().performClick()
         compose.onNodeWithText("周五 · 第 9 节").assertIsDisplayed()
         compose.onNodeWithText("第二实验教学楼 B502（东校区综合实验室）", substring = true).performScrollTo().assertIsDisplayed()

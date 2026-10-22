@@ -190,6 +190,30 @@ class EndInputOnOutsideTapTest {
         compose.onNodeWithContentDescription("保存").performTouchInput { click() }
         compose.runOnIdle { assertEquals(2, saved?.dayOfWeek) }
     }
+    @Test fun courseEditorDeleteTapEndsInputAndOpensConfirmation() {
+        var deletions = 0
+        compose.setContent {
+            val activity = LocalActivity.current as ComponentActivity
+            DisposableEffect(activity) { activity.enableEdgeToEdge(); onDispose {} }
+            val visible = rememberImeVisible()
+            SideEffect { imeVisible = visible }
+            CourseTableTheme {
+                LiquidBackdropHost(Modifier.fillMaxSize().statusBarsPadding()) {
+                    CourseEditorDialog(Course(name = "数学", dayOfWeek = 1, startSection = 1,
+                        duration = 1, startWeek = 1, endWeek = 16), 16, 12, {}, {},
+                        embedded = true, onDelete = { deletions++ })
+                }
+            }
+        }
+        openKeyboard("course-editor-name")
+        compose.onNodeWithTag("course-editor-delete").performScrollTo().performTouchInput { click() }
+        compose.waitUntil(5000) { !imeVisible }
+        compose.onNodeWithText("删除整门课程？").assertIsDisplayed()
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithTag("course-editor-name").assertIsNotFocused()
+        compose.runOnIdle { assertEquals(0, deletions) }
+    }
+
     @Test fun periodTimeSchemeNameFieldClearsFocusOnOutsideTap() {
         val currentTimes = listOf(
             com.coursetable.app.data.PeriodTime(java.time.LocalTime.of(8, 0), java.time.LocalTime.of(8, 45))
@@ -202,7 +226,7 @@ class EndInputOnOutsideTapTest {
             SideEffect { imeVisible = visible }
             CourseTableTheme {
                 LiquidBackdropHost(Modifier.fillMaxSize()) {
-                    com.coursetable.app.ui.PeriodTimeSchemesDialog(
+                    com.coursetable.app.ui.PeriodTimeSchemesScreen(
                         schemes = listOf(scheme),
                         periods = currentTimes,
                         durationMinutes = 45,
@@ -215,7 +239,8 @@ class EndInputOnOutsideTapTest {
                 }
             }
         }
-        compose.onNodeWithText("测试方案").performClick()
+        compose.onNodeWithContentDescription("方案「测试方案」的更多操作").performClick()
+        compose.onNodeWithText("编辑方案").performClick()
         compose.waitForIdle()
         openKeyboard("scheme-name-input")
         compose.onNodeWithTag("scheme-name-input").assertIsFocused()
@@ -246,7 +271,7 @@ class EndInputOnOutsideTapTest {
                 }
             }
         }
-        compose.onNodeWithText("新建课表").performClick()
+        compose.onNodeWithContentDescription("新建课表").performClick()
         compose.waitForIdle()
         openKeyboard("timetable-name-input")
         compose.onNodeWithTag("timetable-name-input").assertIsFocused()

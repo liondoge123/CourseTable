@@ -7,7 +7,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,7 +42,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.CourseApp
@@ -72,6 +67,7 @@ import kotlinx.coroutines.withContext
 
 private enum class SettingsSubpage {
     TIMETABLE_MANAGE,
+    PERIOD_TIMES,
     ABOUT
 }
 
@@ -115,10 +111,8 @@ fun SettingsScreen(
     val timetables by timetablesState.collectAsState()
 
     var showDatePicker by remember { mutableStateOf(false) }
-    var showPeriodsEditor by remember { mutableStateOf(false) }
     val timeSchemes by settingsRepo.periodTimeSchemes.collectAsState(initial = emptyList())
     var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var showThemeModePicker by remember { mutableStateOf(false) }
     var activeSubpage by rememberSaveable { mutableStateOf<SettingsSubpage?>(null) }
     var displayedSubpage by remember { mutableStateOf<SettingsSubpage?>(null) }
     if (activeSubpage != null) {
@@ -262,46 +256,6 @@ fun SettingsScreen(
     }
 
 
-    if (showThemeModePicker) {
-        val current = ThemeMode.fromKey(settings.themeMode)
-        AlertDialog(
-            onDismissRequest = { showThemeModePicker = false },
-            title = { Text("主题模式") },
-            text = {
-                val dismissController = LocalDialogDismissController.current
-                Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap), modifier = Modifier.selectableGroup()) {
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .listItemSurface(ListItemMaterial.Glass, selected = current == mode)
-                                .testTag("theme-mode-${mode.key}")
-                                .selectable(selected = current == mode, role = Role.RadioButton, onClick = {
-                                    dismissController?.dismiss {
-                                        scope.launch { settingsRepo.save(themeMode = mode.key) }
-                                        showThemeModePicker = false
-                                    } ?: run {
-                                        scope.launch { settingsRepo.save(themeMode = mode.key) }
-                                        showThemeModePicker = false
-                                    }
-                                })
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(mode.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium, color = if (current == mode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                            ListChoiceIndicator(current == mode)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = { dismissController?.dismiss() ?: run { showThemeModePicker = false } }) { Text("取消") }
-            }
-        )
-    }
-
     if (showPermDialog) {
         AlertDialog(
             onDismissRequest = { showPermDialog = false },
@@ -437,6 +391,25 @@ fun SettingsScreen(
                         }
                     )
                 }
+                SettingsSubpage.PERIOD_TIMES -> {
+                    val timetableId = settings.timetableId
+                    PeriodTimeSchemesScreen(
+                        schemes = timeSchemes,
+                        periods = settings.periods,
+                        durationMinutes = settings.periodDurationMinutes,
+                        currentSchemeId = settings.activePeriodSchemeId,
+                        onSave = { scheme ->
+                            val normalized = if (scheme.isDefault) scheme.copy(
+                                id = com.coursetable.app.data.PeriodTimeScheme.defaultId(timetableId)
+                            ) else scheme
+                            settingsRepo.savePeriodTimeScheme(normalized)
+                        },
+                        onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
+                        onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },
+                        onDelete = { settingsRepo.deletePeriodTimeScheme(it, timetableId) },
+                        onDismiss = { activeSubpage = null }
+                    )
+                }
                 SettingsSubpage.ABOUT -> {
                     AboutScreen(
                         appVersionName = appVersionName,
@@ -458,7 +431,6 @@ fun SettingsScreen(
                 ) {
                     PageHeader(
                         "设置",
-                        subtitle = "课程安排、提醒、外观与数据",
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
                     )
 
@@ -466,7 +438,7 @@ fun SettingsScreen(
             SettingItem(
                 icon = Icons.Filled.CalendarMonth,
                 title = "课表管理",
-                subtitle = "当前：${settings.timetableName} · 共 ${timetables.size} 个课表",
+                subtitle = "${settings.timetableName} · ${timetables.size} 个课表",
                 onClick = { activeSubpage = SettingsSubpage.TIMETABLE_MANAGE }
             )
             SettingsDivider()
@@ -496,15 +468,18 @@ fun SettingsScreen(
                     "${settings.periods.firstOrNull()?.start?.toString()?.substring(0, 5) ?: "--:--"} - " +
                     "${settings.periods.lastOrNull()?.end?.toString()?.substring(0, 5) ?: "--:--"}",
                 onClick = {
-                    showPeriodsEditor = true
+                    activeSubpage = SettingsSubpage.PERIOD_TIMES
                 }
             )
         }
 
         SettingsGroup(title = "课程显示") {
-            AlignItem(
-                alignLeft = settings.cardAlignLeft,
-                onChange = { scope.launch { settingsRepo.save(cardAlignLeft = it) } }
+            SettingsChoiceItem(
+                id = "card-align", icon = Icons.Filled.FormatAlignLeft,
+                title = "课程卡片文字对齐",
+                selectedKey = if (settings.cardAlignLeft) "left" else "center",
+                choices = listOf(SettingsChoice("center", "居中"), SettingsChoice("left", "靠左")),
+                onSelect = { scope.launch { settingsRepo.save(cardAlignLeft = it == "left") } }
             )
             SettingsDivider()
             SettingItem(
@@ -622,11 +597,13 @@ fun SettingsScreen(
         }
 
         SettingsGroup(title = "外观") {
-            SettingItem(
+            SettingsChoiceItem(
+                id = "theme-mode",
                 icon = Icons.Filled.Brightness6,
                 title = "主题模式",
-                subtitle = ThemeMode.fromKey(settings.themeMode).label,
-                onClick = { showThemeModePicker = true }
+                selectedKey = ThemeMode.fromKey(settings.themeMode).key,
+                choices = ThemeMode.entries.map { SettingsChoice(it.key, it.label) },
+                onSelect = { scope.launch { settingsRepo.save(themeMode = it) } }
             )
             SettingsDivider()
             ThemeColorItem(
@@ -696,20 +673,7 @@ fun SettingsScreen(
         }
     }
 
-    if (showPeriodsEditor) {
-        val timetableId = settings.timetableId
-        PeriodTimeSchemesDialog(
-            schemes = timeSchemes,
-            periods = settings.periods,
-            durationMinutes = settings.periodDurationMinutes,
-            currentSchemeId = settings.activePeriodSchemeId,
-            onSave = { settingsRepo.savePeriodTimeScheme(it) },
-            onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
-            onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },
-            onDelete = { settingsRepo.deletePeriodTimeScheme(it, timetableId) },
-            onDismiss = { showPeriodsEditor = false }
-        )
-    }
+
 }
 /** 权限检查弹窗中的单行：图标 + 名称/说明 + 状态文字 */
 @Composable
@@ -742,7 +706,7 @@ private fun PermRow(
         )
         Spacer(Modifier.width(ListItemDefaults.IconGap))
         Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 text = hint,
                 style = MaterialTheme.typography.bodySmall,
@@ -752,7 +716,7 @@ private fun PermRow(
         Text(
             text = status,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.Medium,
             color = statusColor
         )
     }
@@ -802,7 +766,7 @@ private fun SettingItem(
         )
         Spacer(Modifier.width(ListItemDefaults.IconGap))
         Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = tint)
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal, color = tint)
             if (subtitle != null) {
                 Text(
                     text = subtitle,
@@ -835,7 +799,7 @@ private fun ThemeColorItem(
             ListItemIcon(Icons.Filled.Palette, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(ListItemDefaults.IconGap))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("主题色彩", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Text("主题色彩", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal)
                 Text(
                     text = selected.label,
                     style = MaterialTheme.typography.bodySmall,
@@ -903,74 +867,13 @@ private fun StepperItem(
     ) {
         ListItemIcon(icon, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(ListItemDefaults.IconGap))
-        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal, modifier = Modifier.weight(1f))
         IconButton(onClick = onDecrease) {
             Icon(Icons.Filled.Remove, contentDescription = "减", modifier = Modifier.size(20.dp))
         }
-        Text(value, style = MaterialTheme.typography.titleSmall)
+        Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal)
         IconButton(onClick = onIncrease) {
             Icon(Icons.Filled.Add, contentDescription = "加", modifier = Modifier.size(20.dp))
         }
-    }
-}
-
-/** 课程卡片文字对齐设置行 */
-@Composable
-private fun AlignItem(
-    alignLeft: Boolean,
-    onChange: (Boolean) -> Unit
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 58.dp)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        ListItemIcon(Icons.Filled.FormatAlignLeft, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(ListItemDefaults.IconGap))
-        Text(
-            text = "课程卡片文字对齐",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                .padding(2.dp)
-        ) {
-            AlignSegment("居中", selected = !alignLeft) { onChange(false) }
-            AlignSegment("靠左", selected = alignLeft) { onChange(true) }
-        }
-    }
-}
-
-@Composable
-private fun AlignSegment(label: String, selected: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(8.dp)
-    Box(
-        Modifier
-            .width(46.dp)
-            .height(30.dp)
-            .clip(shape)
-            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }

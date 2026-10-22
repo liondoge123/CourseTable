@@ -16,11 +16,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +71,7 @@ import com.coursetable.app.ui.ImportEntry
 import com.coursetable.app.ui.ImportScreen
 import com.coursetable.app.ui.IncomingFile
 import com.coursetable.app.ui.RootDestination
+import com.coursetable.app.ui.RootNavigationPager
 import com.coursetable.app.ui.SettingsScreen
 import com.coursetable.app.ui.TimetableScreen
 import com.coursetable.app.ui.TimetableViewModel
@@ -93,6 +93,7 @@ import com.coursetable.app.ui.theme.LiquidTheme
 import com.coursetable.app.ui.theme.ThemeColor
 import com.coursetable.app.ui.theme.ThemeMode
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 private val FloatingDockInset = 88.dp
 private val FloatingDockHeight = 54.dp
@@ -153,14 +154,23 @@ private fun MainScreen(
     )
     val settings by vm.settings.collectAsState()
     val courses by vm.courses.collectAsState()
-    var destination by rememberSaveable { mutableStateOf(RootDestination.TIMETABLE) }
+    val pager = rememberPagerState(pageCount = { RootDestination.entries.size })
+    val destination = RootDestination.entries[pager.currentPage]
+    val scope = rememberCoroutineScope()
+    fun navigateTo(target: RootDestination) {
+        scope.launch { pager.animateScrollToPage(target.ordinal) }
+    }
     var activeImport by rememberSaveable { mutableStateOf<ImportEntry?>(null) }
-    var nestedPageOpen by remember { mutableStateOf(false) }
+    var nestedPages by remember { mutableStateOf(emptySet<RootDestination>()) }
+    val nestedPageOpen = RootDestination.entries[pager.settledPage] in nestedPages
+    fun subpageChanged(page: RootDestination, open: Boolean) {
+        nestedPages = if (open) nestedPages + page else nestedPages - page
+    }
     val imeVisible = rememberImeVisible()
 
     LaunchedEffect(incoming) {
         if (incoming != null) {
-            destination = RootDestination.IMPORT
+            pager.scrollToPage(RootDestination.IMPORT.ordinal)
             activeImport = ImportEntry.INCOMING
         }
     }
@@ -200,31 +210,16 @@ private fun MainScreen(
                                 onIncomingConsumed()
                             },
                             initialEntry = activeImport ?: ImportEntry.HUB,
-                            onImported = { activeImport = null; destination = RootDestination.TIMETABLE },
+                            onImported = { activeImport = null; navigateTo(RootDestination.TIMETABLE) },
                             onBack = {
                                 activeImport = null
                             }
                         )
                     } else {
-                        AnimatedContent(
-                            targetState = destination,
-                            transitionSpec = {
-                                val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                                (slideInHorizontally(
-                                    initialOffsetX = { (it * 0.20f * direction).toInt() },
-                                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                                ) + fadeIn(
-                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                                )).togetherWith(
-                                    slideOutHorizontally(
-                                        targetOffsetX = { (-it * 0.20f * direction).toInt() },
-                                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                                    ) + fadeOut(
-                                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
-                                    )
-                                )
-                            },
-                            label = "RootTabTransition"
+                        RootNavigationPager(
+                            state = pager,
+                            userScrollEnabled = !nestedPageOpen && !imeVisible,
+                            active = activeImport == null
                         ) { dest ->
                             when (dest) {
                                 // Each page owns its scroll-content insets and glass edge.
@@ -244,13 +239,13 @@ private fun MainScreen(
                                     )
                                 }
                                 RootDestination.IMPORT -> ImportScreen(
-                                    onImported = { nestedPageOpen = false; destination = RootDestination.TIMETABLE },
+                                    onImported = { subpageChanged(dest, false); navigateTo(RootDestination.TIMETABLE) },
                                     bottomContentPadding = FloatingDockInset,
-                                    onSubpageChanged = { nestedPageOpen = it }
+                                    onSubpageChanged = { subpageChanged(dest, it) }
                                 )
                                 RootDestination.SETTINGS -> SettingsScreen(
                                     bottomContentPadding = FloatingDockInset,
-                                    onSubpageChanged = { nestedPageOpen = it }
+                                    onSubpageChanged = { subpageChanged(dest, it) }
                                 )
                             }
                         }
@@ -275,8 +270,7 @@ private fun MainScreen(
             FloatingNavigationDock(
                 selectedTab = destination,
                 onTabSelected = {
-                    nestedPageOpen = false
-                    destination = it
+                    navigateTo(it)
                 },
                 onActionClick = {
                     val day = if (destination == RootDestination.TIMETABLE) {

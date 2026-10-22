@@ -58,12 +58,12 @@ private val AppShapes = LiquidShapes(RoundedCornerShape(20.dp))
 
 private fun lightScheme(accent: Color, soft: Color) = LiquidColorScheme(
     accent, Color.White, soft, Color(0xFF101114), Color(0xFFF4F6FB), Color(0xFF111114),
-    Color(0xE6FFFFFF), Color(0xFF65666D), Color(0x2A6D7180), Color(0xC7FFFFFF),
+    Color(0xE6FFFFFF), Color(0xFF555B66), Color(0x2A6D7180), Color(0xC7FFFFFF),
     Color(0xFFF0F2F7), Color(0xFFFF3B30), Color(0xB0FFFFFF), Color(0x78FFFFFF), false
 )
 private fun darkScheme(accent: Color, soft: Color) = LiquidColorScheme(
     accent, Color(0xFF07101F), soft, Color.White, Color(0xFF080A0F), Color(0xFFF5F5F7),
-    Color(0xD81C1D22), Color(0xFFA0A1AA), Color(0x458E8E93), Color(0xC426282E),
+    Color(0xD81C1D22), Color(0xFFB6B8C2), Color(0x458E8E93), Color(0xC426282E),
     Color(0xFF343740), Color(0xFFFF453A), Color(0x9E282B33), Color(0x3FFFFFFF), true
 )
 

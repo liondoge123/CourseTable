@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Rect
@@ -166,6 +167,8 @@ internal fun UnifiedImportReview(
     val adding = addingId?.let { CandidateCourse("", dayOfWeek = 1, startSection = 1, duration = 1, startWeek = 1, endWeek = settings.totalWeeks, weekType = 0, draftId = it) }
     var queue by rememberSaveable { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
+    var moreTriggerHidden by remember { mutableStateOf(false) }
+    val moreSource = rememberMenuSource()
     var pendingMoreAction by remember { mutableStateOf<ReviewMoreAction?>(null) }
     var moreAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var original by remember { mutableStateOf(false) }
@@ -304,14 +307,18 @@ internal fun UnifiedImportReview(
                     TextButton(
                         onClick = { more = true },
                         enabled = !saving && editing == null,
-                        modifier = Modifier.onGloballyPositioned { moreAnchorBounds = it.boundsInRoot() }
-                    ) { Text("更多") }
+                        modifier = Modifier.graphicsLayer { alpha = if (moreTriggerHidden) 0f else 1f }
+                            .onGloballyPositioned { moreAnchorBounds = it.boundsInRoot() }
+                    ) { Text("更多", Modifier.captureMenuSource(moreSource, moreTriggerHidden)) }
                     DropdownMenu(
                         expanded = more,
                         onDismissRequest = { more = false },
                         anchorBounds = moreAnchorBounds,
                         alignment = DropdownMenuAlignment.END,
+                        sourceContent = moreSource,
+                        onSourceCovered = { moreTriggerHidden = true },
                         onClosed = {
+                            moreTriggerHidden = false
                             when (pendingMoreAction) {
                                 ReviewMoreAction.ADD -> {
                                     queue = false
@@ -365,7 +372,7 @@ internal fun UnifiedImportReview(
                         if (suggestions > 0) add(2 to "建议确认 $suggestions")
                     }
                     filters.forEach { (id, label) ->
-                        OptionChip(activeFilter == id, { filter = id }, label, large = true, outlined = false)
+                        OptionChip(activeFilter == id, { filter = id }, label, large = true)
                     }
                 }
                 if (errors + suggestions > 0) TextButton(onClick = ::startQueue, enabled = !saving && editing == null) { Text("开始校对") }

@@ -38,7 +38,7 @@ class GlobalListDesignTest {
             .use { it.readBytes() }
     }
 
-    @Test fun pageAndOverlayListsKeepTheirContentReadableInBothThemes() {
+    @Test fun pagesKeepTheirContentReadableInBothThemes() {
         val mode = mutableStateOf(ThemeMode.LIGHT)
         val page = mutableIntStateOf(0)
         val periods = AppSettings.defaultPeriods()
@@ -54,7 +54,7 @@ class GlobalListDesignTest {
                         1 -> ImportScreen()
                         2 -> AboutScreen("preview", {})
                         3 -> EduImportScreen(java.time.LocalDate.of(2026, 9, 1), { _, _ -> }, {})
-                        else -> PeriodTimeSchemesDialog(listOf(scheme), periods, 45, scheme.id, {}, {}, {}, {}, {})
+                        else -> PeriodTimeSchemesScreen(listOf(scheme), periods, 45, scheme.id, {}, {}, {}, {}, {})
                     }
                 }
             }
@@ -65,7 +65,11 @@ class GlobalListDesignTest {
                 compose.runOnIdle { page.intValue = scene }
                 val title = listOf("设置", "课程数据导入", "关于 CourseTable", "从教务系统导入", "节次时间")[scene]
                 compose.onNodeWithText(title).assertIsDisplayed()
-                if (scene == 4) compose.onNodeWithText("日间作息").assertIsDisplayed()
+                if (scene == 4) {
+                    compose.onNodeWithText("日间作息").assertIsDisplayed()
+                    compose.onNodeWithTag("period-times-page").assertIsDisplayed()
+                    compose.onNodeWithTag("overlay-glass-dialog").assertDoesNotExist()
+                }
                 capture("page-$scene-${theme.key}")
             }
         }
@@ -99,7 +103,7 @@ class GlobalListDesignTest {
             }
         }
         val text = compose.onNodeWithText(title, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val indicator = compose.onNodeWithContentDescription("当前课表", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val indicator = compose.onNodeWithTag("dropdown-selection-indicator", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("A long menu title must leave room for the selection indicator", text.right <= indicator.left)
         compose.onNodeWithText(title).assertHeightIsAtLeast(48.dp).performClick()
         compose.runOnIdle { assertEquals(1, clicks) }

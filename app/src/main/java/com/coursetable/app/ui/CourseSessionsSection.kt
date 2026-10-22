@@ -1,7 +1,6 @@
 package com.coursetable.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,7 +56,7 @@ internal fun CourseSessionsSection(
             Row(Modifier.heightIn(min = if (sessions.size > 1) 48.dp else 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.EventNote, null, Modifier.size(20.dp), tint = LiquidTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.width(8.dp))
-                Text("上课时段", style = LiquidTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("上课时段", style = LiquidTheme.typography.titleMedium)
             }
             if (sessions.size > 1) {
                 FilledTonalButton(
@@ -69,7 +68,7 @@ internal fun CourseSessionsSection(
                     },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text("时段 ${selectedIndex + 1} / ${sessions.size}", style = LiquidTheme.typography.labelMedium)
+                    Text("时段 ${selectedIndex + 1} / ${sessions.size}", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.width(6.dp))
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp).rotate(90f))
                 }
@@ -80,20 +79,15 @@ internal fun CourseSessionsSection(
             FilledTonalButton(onClick = onAdd, enabled = enabled, modifier = Modifier.weight(1f).testTag("course-session-add")) {
                 Icon(Icons.Filled.Add, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("添加时段")
+                Text("添加时段", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             }
             if (onRemove != null) {
-                IconButton(
+                QuietDeleteButton(
+                    description = "删除此时段",
                     onClick = onRemove,
                     enabled = enabled,
-                    modifier = Modifier.testTag("course-session-remove"),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = LiquidTheme.colorScheme.error.copy(alpha = 0.10f),
-                        contentColor = LiquidTheme.colorScheme.error
-                    )
-                ) {
-                    Icon(Icons.Filled.Delete, "删除此时段", Modifier.size(18.dp))
-                }
+                    modifier = Modifier.testTag("course-session-remove")
+                )
             }
         }
     }
@@ -110,12 +104,10 @@ private fun SessionPickerDialog(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("切换上课时段") },
+        title = { Text("切换上课时段", style = LiquidTheme.typography.titleMedium) },
         text = {
             val dismissController = LocalDialogDismissController.current
-            val colors = LiquidTheme.colorScheme
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("选择要编辑的时段", style = LiquidTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 LazyColumn(
                     Modifier.heightIn(max = 360.dp)
                         .selectableGroup().testTag("course-session-choices"),
@@ -134,7 +126,9 @@ private fun SessionPickerDialog(
         },
         confirmButton = {
             val dismissController = LocalDialogDismissController.current
-            TextButton(onClick = { dismissController?.dismiss() ?: onDismiss() }) { Text("取消") }
+            TextButton(onClick = { dismissController?.dismiss() ?: onDismiss() }) {
+                Text("取消", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            }
         }
     )
 }
@@ -157,18 +151,17 @@ private fun SessionGlassChoice(session: Course, index: Int, active: Boolean, ena
         Box(
             Modifier.size(28.dp).clip(CircleShape)
                 .background(if (active) colors.primary.copy(alpha = 0.10f) else Color.White.copy(alpha = if (dark) 0.04f else 0.12f))
-                .border(0.7.dp, Color.White.copy(alpha = if (dark) 0.18f else 0.48f), CircleShape)
                 .clearAndSetSemantics {},
             contentAlignment = Alignment.Center
         ) {
-            Text("${index + 1}", style = LiquidTheme.typography.labelMedium,
+            Text("${index + 1}", style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 color = if (active) colors.primary else colors.onSurfaceVariant)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(sessionTime(session), style = LiquidTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+            Text(sessionTime(session), style = LiquidTheme.typography.bodyLarge,
                 color = if (active) colors.primary else colors.onSurface)
             Text(listOf(session.weeksLabel(), session.location).filter { it.isNotBlank() }.joinToString(" · "),
-                style = LiquidTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                style = LiquidTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         }
         ListChoiceIndicator(active, Modifier.padding(top = 2.dp))
     }
@@ -188,16 +181,16 @@ internal fun SessionSettingRow(title: String, value: String, icon: ImageVector, 
             ) {
                 Icon(icon, null, Modifier.size(18.dp), tint = LiquidTheme.colorScheme.onSurfaceVariant)
                 if (value.isBlank()) {
-                    Text(title,modifier = Modifier.weight(1f),style=LiquidTheme.typography.bodyMedium,fontWeight=FontWeight.SemiBold,
+                    Text(title,modifier = Modifier.weight(1f),style=LiquidTheme.typography.bodyMedium,
                         color=if (isError) LiquidTheme.colorScheme.error else LiquidTheme.colorScheme.onSurface)
                 } else if (inline) {
                     Text(title,style=LiquidTheme.typography.bodyMedium,color=LiquidTheme.colorScheme.onSurfaceVariant)
-                    Text(value,modifier = Modifier.weight(1f),textAlign = TextAlign.End,style=LiquidTheme.typography.bodyMedium,
-                        fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
+                    Text(value,modifier = Modifier.weight(1f),textAlign = TextAlign.End,style=LiquidTheme.typography.bodyLarge,
+                        maxLines=2,overflow=TextOverflow.Ellipsis)
                 } else {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(title,style=LiquidTheme.typography.labelMedium,color=LiquidTheme.colorScheme.onSurfaceVariant)
-                        Text(value,style=LiquidTheme.typography.bodyMedium,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
+                        Text(title,style=LiquidTheme.typography.bodyMedium,color=LiquidTheme.colorScheme.onSurfaceVariant)
+                        Text(value,style=LiquidTheme.typography.bodyLarge,maxLines=2,overflow=TextOverflow.Ellipsis)
                     }
                 }
                 ListItemChevron()

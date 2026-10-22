@@ -28,6 +28,31 @@ class DefaultPeriodSchemeTest {
             mutex.withLock { transform(state.value).also { state.value = it } }
     }
 
+    @Test fun savingDefaultDoesNotApplyItAndAllowsOtherTablesDefaults() { runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        val repository = SettingsRepository(context, database.timetableDao(), MemoryPreferences())
+        try {
+            database.timetableDao().upsert(Timetable(id = 101, name = "秋季"))
+            database.timetableDao().upsert(Timetable(id = 102, name = "春季"))
+            repository.setActiveTimetable(102)
+            repository.setActiveTimetable(101)
+            val default = repository.periodTimeSchemes.first().first()
+            val winter = PeriodTimeScheme("winter", "冬季", listOf(
+                PeriodTime(LocalTime.of(9, 0), LocalTime.of(9, 45))
+            ), 45)
+            repository.savePeriodTimeScheme(winter)
+            repository.applyPeriodTimeScheme(101, winter)
+            val edited = default.copy(durationMinutes = 50)
+            repository.savePeriodTimeScheme(edited)
+            assertEquals(winter.periods, database.timetableDao().byId(101)!!.periods())
+            assertEquals(winter.id, repository.settings.first().activePeriodSchemeId)
+            assertEquals(edited, repository.periodTimeSchemes.first().first())
+            repository.applyPeriodTimeScheme(101, edited)
+            assertEquals(50, repository.settings.first().periodDurationMinutes)
+        } finally { database.close() }
+    } }
+
     @Test fun defaultSurvivesEditsDeletionRestartAndTableSwitches() { runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
