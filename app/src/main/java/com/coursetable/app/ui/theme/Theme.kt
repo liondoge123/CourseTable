@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.coursetable.app.data.GlassEffect
 
 enum class ThemeMode(val key: String, val label: String) {
     AUTO("auto", "自动"), LIGHT("light", "浅色"), DARK("dark", "深色");
@@ -82,11 +83,13 @@ enum class ThemeColor(
 private val LocalColors = staticCompositionLocalOf { ThemeColor.BLUE.lightScheme }
 private val LocalTypography = staticCompositionLocalOf { AppTypography }
 private val LocalShapes = staticCompositionLocalOf { AppShapes }
+private val LocalGlassEffect = staticCompositionLocalOf { GlassEffect.STANDARD }
 
 object LiquidTheme {
     val colorScheme: LiquidColorScheme @Composable get() = LocalColors.current
     val typography: LiquidTypography @Composable get() = LocalTypography.current
     val shapes: LiquidShapes @Composable get() = LocalShapes.current
+    val glassEffect: GlassEffect @Composable get() = LocalGlassEffect.current
 }
 
 val CourseColorPalette = listOf(
@@ -123,6 +126,7 @@ fun nextUnusedCourseColor(existingCourses: Collection<com.coursetable.app.data.C
 fun CourseTableTheme(
     themeMode: ThemeMode = ThemeMode.AUTO,
     themeColor: ThemeColor = ThemeColor.BLUE,
+    glassEffect: GlassEffect = GlassEffect.STANDARD,
     content: @Composable () -> Unit
 ) {
     val dark = when (themeMode) {
@@ -151,6 +155,7 @@ fun CourseTableTheme(
         LocalColors provides colorScheme,
         LocalTypography provides AppTypography,
         LocalShapes provides AppShapes,
+        LocalGlassEffect provides glassEffect,
         LocalIndication provides rippleIndication,
         content = content
     )

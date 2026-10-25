@@ -53,7 +53,7 @@ fun TimetableManageScreen(
             }
         }
     }) { pageInsets ->
-        LazyColumn(Modifier.fillMaxSize().selectableGroup().testTag("timetables-list"), contentPadding = pageInsets.pagePadding(),
+        LazyColumn(Modifier.fillMaxSize().selectableGroup().testTag("timetables-list"), state = rememberPageLazyListState(), contentPadding = pageInsets.pagePadding(),
             verticalArrangement = Arrangement.spacedBy(ManagementListDefaults.Gap)) {
             item(key = "summary") {
                 Text(

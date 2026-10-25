@@ -1,7 +1,6 @@
 package com.coursetable.app.ui
 
 import com.coursetable.app.data.weeksLabel
-import com.coursetable.app.data.scheduledWeeks
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -28,7 +27,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,10 +35,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -115,6 +115,7 @@ fun TimetableScreen(
 ) {
     val settings = vm.latestSettings
     val courses by vm.courses.collectAsState()
+    val courseIndex = remember(courses) { TimetableCourseIndex(courses) }
     val timetables by vm.timetables.collectAsState()
     ObserveCurrentDate(vm)
 
@@ -142,57 +143,65 @@ fun TimetableScreen(
         }
     }
 
-    LiquidScrollablePage(topBarPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), floatingTopBar = true, topBar = {
-        WeekHeader(
-            todayWeek = todayWeek,
-            displayedWeek = displayedWeek,
-            totalWeeks = totalWeeks,
-            timetables = timetables,
-            activeTimetableId = settings.timetableId,
-            onSwitchTimetable = { vm.switchTimetable(it) },
-            canPrev = pagerState.currentPage > 0,
-            canNext = pagerState.currentPage < totalWeeks - 1,
-            onPrev = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
-            onNext = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } },
-            onTitleClick = { showWeekPicker = true },
-            filter = vm.weekFilter,
-            onCycleFilter = {
-                val next = when (vm.weekFilter) {
-                    WeekFilter.ALL -> WeekFilter.ODD
-                    WeekFilter.ODD -> WeekFilter.EVEN
-                    WeekFilter.EVEN -> WeekFilter.ALL
+    val wallpaperBitmap = rememberWallpaperBitmap(settings.wallpaper)
+    androidx.compose.runtime.CompositionLocalProvider(LocalWallpaperActive provides (wallpaperBitmap != null),
+        LocalWallpaperCardOpacity provides (settings.wallpaper?.normalized()?.cardOpacity ?: 1f)) {
+        LiquidScrollablePage(wallpaperVisible = wallpaperBitmap != null, background = { WallpaperBackground(settings.wallpaper, wallpaperBitmap,
+            it.testTag(if (wallpaperBitmap != null) "timetable-wallpaper-background" else "timetable-default-background")) }, topBarPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), floatingTopBar = true, topBar = {
+            WeekHeader(
+                todayWeek = todayWeek,
+                displayedWeek = displayedWeek,
+                totalWeeks = totalWeeks,
+                timetables = timetables,
+                activeTimetableId = settings.timetableId,
+                onSwitchTimetable = { vm.switchTimetable(it) },
+                canPrev = pagerState.currentPage > 0,
+                canNext = pagerState.currentPage < totalWeeks - 1,
+                onPrev = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) } },
+                onNext = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } },
+                onTitleClick = { showWeekPicker = true },
+                filter = vm.weekFilter,
+                onCycleFilter = {
+                    val next = when (vm.weekFilter) {
+                        WeekFilter.ALL -> WeekFilter.ODD
+                        WeekFilter.ODD -> WeekFilter.EVEN
+                        WeekFilter.EVEN -> WeekFilter.ALL
+                    }
+                    vm.setFilter(next)
                 }
-                vm.setFilter(next)
-            }
-        )
-    }) { pageInsets ->
-            val direction = LocalLayoutDirection.current
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize().padding(
-                    start = pageInsets.calculateStartPadding(direction), end = pageInsets.calculateEndPadding(direction)
-                )
-            ) { page ->
-                val week = page + 1
-                val visible = remember(courses, settings.showNonCurrentWeek, vm.weekFilter, week) {
-                    rememberCourses(settings, courses, week, vm.weekFilter)
+            )
+        }) { pageInsets ->
+                val direction = LocalLayoutDirection.current
+                HorizontalPager(
+                    state = pagerState,
+                    // The root pager owns horizontal input until this page is fully
+                    // active; a partially visible week pager must not steal its release.
+                    userScrollEnabled = LocalBackLayerActive.current,
+                    modifier = Modifier.fillMaxSize().padding(
+                        start = pageInsets.calculateStartPadding(direction), end = pageInsets.calculateEndPadding(direction)
+                    )
+                ) { page ->
+                    val week = page + 1
+                    val visible = remember(courseIndex, settings.showNonCurrentWeek, vm.weekFilter, week) {
+                        courseIndex.forWeek(week, settings.showNonCurrentWeek, vm.weekFilter)
+                    }
+                    TimetableGrid(
+                        topContentPadding = pageInsets.calculateTopPadding(),
+                        bottomContentPadding = bottomContentPadding + pageInsets.calculateBottomPadding(),
+                        settings = settings,
+                        semesterStart = settings.semesterStart,
+                        displayedWeek = week,
+                        visible = visible,
+                        isTimeTodayColumn = todayWeek == week,
+                        todayDay = vm.today.dayOfWeek.value,
+                        onCourseTap = { vm.showDetail(it) },
+                        onCellTap = { day, section -> vm.openCellEditor(day, section) },
+                        onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null
+                    )
                 }
-                TimetableGrid(
-                    topContentPadding = pageInsets.calculateTopPadding(),
-                    bottomContentPadding = bottomContentPadding + pageInsets.calculateBottomPadding(),
-                    settings = settings,
-                    semesterStart = settings.semesterStart,
-                    displayedWeek = week,
-                    visible = visible,
-                    isTimeTodayColumn = todayWeek == week,
-                    todayDay = vm.today.dayOfWeek.value,
-                    onCourseTap = { vm.showDetail(it) },
-                    onCellTap = { day, section -> vm.openCellEditor(day, section) },
-                    onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null
-                )
-            }
-    }
+        }
 
+    }
     if (showWeekPicker) {
         WeekPickerDialog(
             currentWeek = displayedWeek,
@@ -219,25 +228,6 @@ fun TimetableScreen(
             onDelete = { vm.deleteCourse(detail) }
         )
     }
-}
-
-private fun rememberCourses(
-    settings: AppSettings,
-    courses: List<Course>,
-    displayedWeek: Int,
-    filter: WeekFilter
-): List<Course> {
-    val byFilter = when (filter) {
-        WeekFilter.ALL -> courses
-        WeekFilter.ODD -> courses.filter {
-            it.scheduledWeeks().any { week -> week % 2 == 1 }
-        }
-        WeekFilter.EVEN -> courses.filter {
-            it.scheduledWeeks().any { week -> week % 2 == 0 }
-        }
-    }
-    val notEnded = byFilter.filter { it.lastWeek() >= displayedWeek }
-    return if (settings.showNonCurrentWeek) notEnded else notEnded.filter { it.visibleOnWeek(displayedWeek) }
 }
 
 @Composable
@@ -572,13 +562,13 @@ private fun WeekNavigationPill(
 }
 
 @Composable
-private fun TimetableGrid(
+internal fun TimetableGrid(
     topContentPadding: androidx.compose.ui.unit.Dp,
     bottomContentPadding: androidx.compose.ui.unit.Dp,
     settings: AppSettings,
     semesterStart: LocalDate,
     displayedWeek: Int,
-    visible: List<Course>,
+    visible: List<TimetableCourseItem>,
     isTimeTodayColumn: Boolean,
     todayDay: Int,
     onCourseTap: (Course) -> Unit,
@@ -588,22 +578,24 @@ private fun TimetableGrid(
     val timeColW = TIME_COL_DP.dp
     val slotH = SLOT_H_DP.dp
     val headerH = HEADER_H_DP.dp
-    val vScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val vScroll = rememberContextScrollState(LocalTimetableScrollKey.current)
     val bottomThresholdPx = with(LocalDensity.current) { 8.dp.roundToPx() }
     val slots = settings.periods.size.coerceAtLeast(1)
     val periods = settings.periods
-    var currentTime by remember { mutableStateOf(LocalTime.now()) }
+    val currentTime = remember { mutableStateOf(LocalTime.now()) }
 
     LaunchedEffect(isTimeTodayColumn, todayDay) {
         if (!isTimeTodayColumn || todayDay !in 1..7) return@LaunchedEffect
         while (true) {
-            currentTime = LocalTime.now()
+            currentTime.value = LocalTime.now()
             delay(30_000L)
         }
     }
 
     val lineColor = MaterialTheme.colorScheme.outlineVariant
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val surfaceColor = if (LocalWallpaperActive.current) MaterialTheme.colorScheme.surface.copy(
+        alpha = settings.wallpaper?.normalized()?.gridOpacity ?: .65f)
+        else MaterialTheme.colorScheme.surface
     val todayColBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
     val containerCornerRadius = 12.dp
     val containerShape = RoundedCornerShape(containerCornerRadius)
@@ -612,12 +604,12 @@ private fun TimetableGrid(
         topEnd = containerCornerRadius
     )
 
-    LaunchedEffect(vScroll, onAtBottomChanged) {
+    val currentOnAtBottomChanged by rememberUpdatedState(onAtBottomChanged)
+    LaunchedEffect(vScroll, onAtBottomChanged != null, bottomThresholdPx) {
         if (onAtBottomChanged == null) return@LaunchedEffect
-        snapshotFlow { vScroll.value to vScroll.maxValue }
-            .collect { (value, maxValue) ->
-                onAtBottomChanged(maxValue > 0 && value >= (maxValue - bottomThresholdPx).coerceAtLeast(0))
-            }
+        snapshotFlow {
+            vScroll.maxValue > 0 && vScroll.value >= (vScroll.maxValue - bottomThresholdPx).coerceAtLeast(0)
+        }.collect { currentOnAtBottomChanged?.invoke(it) }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -712,34 +704,38 @@ private fun TimetableGrid(
                             }
                     )
 
-                    visible.forEach { course ->
-                        val isTodayCourse = highlightToday &&
-                            course.dayOfWeek == todayDay &&
-                            course.visibleOnWeek(displayedWeek)
-                        val progress = if (isTodayCourse) {
-                            PeriodUtils.calculateCourseProgress(
-                                startSection = course.startSection,
-                                duration = course.duration,
-                                periods = periods,
-                                now = currentTime
-                            )
-                        } else null
-
-                        CourseCard(
-                            course = course,
-                            timeColW = timeColW,
-                            dayW = dayW,
-                            slotH = slotH,
-                            alignLeft = settings.cardAlignLeft,
-                            dimmed = settings.showNonCurrentWeek && !course.visibleOnWeek(displayedWeek),
-                            progress = progress,
-                            onClick = { onCourseTap(course) }
-                        )
+                    visible.forEach { item ->
+                        key(item.course.id) {
+                            TimetableCourse(item, highlightToday && item.course.dayOfWeek == todayDay,
+                                currentTime, periods, timeColW, dayW, slotH, settings.cardAlignLeft, onCourseTap)
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun TimetableCourse(
+    item: TimetableCourseItem,
+    today: Boolean,
+    currentTime: State<LocalTime>,
+    periods: List<PeriodTime>,
+    timeColW: androidx.compose.ui.unit.Dp,
+    dayW: androidx.compose.ui.unit.Dp,
+    slotH: androidx.compose.ui.unit.Dp,
+    alignLeft: Boolean,
+    onCourseTap: (Course) -> Unit
+) {
+    // Only today's scheduled cards observe the clock. A time tick must not
+    // recompose the whole grid, its date headers or the other course cards.
+    val progress = if (today && item.scheduledThisWeek) {
+        PeriodUtils.calculateCourseProgress(item.course.startSection, item.course.duration,
+            periods, currentTime.value)
+    } else null
+    CourseCard(item.course, timeColW, dayW, slotH, alignLeft,
+        dimmed = !item.scheduledThisWeek, progress = progress, onClick = { onCourseTap(item.course) })
 }
 
 @Composable
@@ -948,7 +944,9 @@ internal fun CourseDetailDialog(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            ListItemSurface(Modifier.padding(horizontal = 20.dp), material = ListItemMaterial.Inset, shape = ListItemDefaults.GroupShape) {
+            // The sheet already supplies the material; keep detail rows on that
+            // same surface instead of adding a second, whiter panel in the middle.
+            Box(Modifier.padding(horizontal = 20.dp)) {
                 Column(
                     Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)

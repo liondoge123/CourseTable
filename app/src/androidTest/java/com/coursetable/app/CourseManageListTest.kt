@@ -2,8 +2,6 @@ package com.coursetable.app
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -12,7 +10,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.LayoutDirection
 import com.coursetable.app.data.Course
 import com.coursetable.app.ui.CourseManageScreen
-import com.coursetable.app.ui.RootNavigationPager
+import com.coursetable.app.ui.RootNavigationHost
+import com.coursetable.app.ui.RootNavigationState
+import com.coursetable.app.ui.rememberRootNavigationState
 import com.coursetable.app.ui.RootDestination
 import com.coursetable.app.ui.liquid.LiquidBackdropHost
 import com.coursetable.app.ui.liquid.Text
@@ -63,12 +63,11 @@ class CourseManageListTest {
     @Test fun horizontalDragsHaveNoDeleteActionOrAccidentalEditInEitherLayoutDirection() {
         val direction = mutableStateOf(LayoutDirection.Ltr)
         var deletions = 0
-        lateinit var pager: PagerState
+        lateinit var navigation: RootNavigationState
         compose.setContent { CompositionLocalProvider(LocalLayoutDirection provides direction.value) {
             CourseTableTheme { LiquidBackdropHost(Modifier.fillMaxSize()) {
-                pager = rememberPagerState(initialPage = RootDestination.COURSES.ordinal,
-                    pageCount = { RootDestination.entries.size })
-                RootNavigationPager(pager, true) { page ->
+                navigation = rememberRootNavigationState(RootDestination.COURSES)
+                RootNavigationHost(navigation, true) { page ->
                     if (page == RootDestination.COURSES) CourseManageScreen(
                         listOf(course(1)), 18, 12, {}, {}, { deletions++ }, rootMode = true
                     ) else Box(Modifier.fillMaxSize()) { Text(page.name) }
@@ -80,11 +79,11 @@ class CourseManageListTest {
             compose.onNodeWithTag("managed-course-1").performTouchInput {
                 if (layout == LayoutDirection.Ltr) swipeLeft() else swipeRight()
             }
-            compose.runOnIdle { assertEquals(RootDestination.IMPORT.ordinal, pager.settledPage) }
+            compose.runOnIdle { assertEquals(RootDestination.IMPORT, navigation.settledDestination) }
             compose.onNodeWithTag("root-pager").performTouchInput {
                 if (layout == LayoutDirection.Ltr) swipeRight() else swipeLeft()
             }
-            compose.runOnIdle { assertEquals(RootDestination.COURSES.ordinal, pager.settledPage) }
+            compose.runOnIdle { assertEquals(RootDestination.COURSES, navigation.settledDestination) }
             compose.onNodeWithContentDescription("删除课程").assertDoesNotExist()
             compose.onNodeWithTag("course-editor-name").assertDoesNotExist()
             compose.onNodeWithTag("managed-course-1").assertIsDisplayed()

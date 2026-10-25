@@ -164,6 +164,7 @@ fun ImportScreen(
     bottomContentPadding: Dp = 0.dp,
     onSubpageChanged: (Boolean) -> Unit = {},
     onImported: () -> Unit = {},
+    flowKey: String = "root-import",
     recognizeImage: (suspend (android.content.Context, PreparedImportImage, ImageSelection, AppSettings) -> VisualImportSession)? = null
 ) {
     val context = LocalContext.current
@@ -171,7 +172,8 @@ fun ImportScreen(
     val repo = remember { app.courseRepository }
     val settingsRepo = remember { app.settingsRepository }
     val timetableRepo = remember { app.timetableRepository }
-    val flowState: ImportFlowState = androidx.lifecycle.viewmodel.compose.viewModel()
+    // The retained hub and an external-file page can coexist under the same Activity.
+    val flowState: ImportFlowState = androidx.lifecycle.viewmodel.compose.viewModel(key = flowKey)
     val scope = flowState.viewModelScope
 
     val settingsState = remember(settingsRepo) {
@@ -200,11 +202,17 @@ fun ImportScreen(
     var showPasteImport by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var displayedPasteImport by remember { mutableStateOf(false) }
     if (showPasteImport || showEduImport) displayedPasteImport = showPasteImport
+    val subpageScrollVisit = rememberPageScrollVisit(when {
+        showPasteImport -> "paste"
+        showEduImport -> "edu"
+        else -> null
+    })
     var entryHandled by androidx.compose.runtime.saveable.rememberSaveable(initialEntry) { mutableStateOf(false) }
 
     val imagePreviewOpen = pendingPreview != null && pendingPreview !is ImportPreview.Backup
-    LaunchedEffect(showEduImport, showPasteImport, imagePreviewOpen, importPageActive) {
-        if (importPageActive) onSubpageChanged(showEduImport || showPasteImport || imagePreviewOpen)
+    var subpageMounted by remember { mutableStateOf(false) }
+    LaunchedEffect(subpageMounted, imagePreviewOpen, importPageActive) {
+        if (importPageActive) onSubpageChanged(subpageMounted || imagePreviewOpen)
     }
 
     fun toast(msg: String) {
@@ -234,11 +242,14 @@ fun ImportScreen(
                     if (content.isNullOrBlank()) {
                         toast("文件为空")
                     } else {
-                        val parsed = IcsParser.parse(content)
+                        val importSettings = settings
+                        val (parsed, outcome) = withContext(Dispatchers.Default) {
+                            val parsed = IcsParser.parse(content)
+                            parsed to IcsImporter.convert(parsed.events, importSettings)
+                        }
                         if (parsed.events.isEmpty()) {
                             toast("没有找到可导入的课程日程（${parsed.warnings.joinToString("；").ifBlank { "格式不受支持" }}）")
                         } else {
-                            val outcome = IcsImporter.convert(parsed.events, settings)
                             pendingPreview = ImportPreview.Ics(outcome.courses, parsed.warnings + outcome.warnings)
                             reviewCandidates = pendingPreview!!.imports.single().candidates.map { it.copy(draftId = java.util.UUID.randomUUID().toString()) }
                             overwriteMode = false
@@ -250,7 +261,7 @@ fun ImportScreen(
                     if (content.isNullOrBlank()) {
                         toast("文件为空")
                     } else {
-                        val data = BackupManager.parse(content)
+                        val data = withContext(Dispatchers.Default) { BackupManager.parse(content) }
                         if (data.timetables.isEmpty()) {
                             toast(data.warnings.joinToString("\n").ifBlank { "备份文件无效" })
                         } else {
@@ -364,14 +375,18 @@ fun ImportScreen(
         }
     }
 
-    CompositionLocalProvider(LocalBackLayerActive provides (LocalBackLayerActive.current && !imagePreviewOpen)) {
+    CompositionLocalProvider(
+        LocalBackLayerActive provides (LocalBackLayerActive.current && !imagePreviewOpen),
+        LocalPageScrollKey provides subpageScrollVisit
+    ) {
     PredictivePageTransition(
         targetState = showPasteImport || showEduImport,
         onBack = {
             if (showPasteImport) showPasteImport = false
             else if (initialEntry == ImportEntry.EDU && onBack != null) onBack()
             else showEduImport = false
-        }
+        },
+        onMountedChanged = { subpageMounted = it }
     ) { isSubpage ->
         if (isSubpage && displayedPasteImport) {
             PasteImportScreen(settings = settings, onParsed = { result ->
@@ -418,11 +433,6 @@ fun ImportScreen(
                             "课程数据导入",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            "选择一种方式将课程导入到课表",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -517,6 +527,9 @@ fun ImportScreen(
                 try {
                     require(request.candidates.size <= ImportPolicy.MAX_OUTPUT_COURSES)
                     val summary = app.database.commitImport(request, settings)
+                    if (request.mode == com.coursetable.app.importer.ImportMode.OVERWRITE) {
+                        app.timetableScrollResets.onOverwriteCommitted(summary.timetableId)
+                    }
                     if (summary.timetableId != settings.timetableId) settingsRepo.setActiveTimetable(summary.timetableId)
                     toast("新增 ${summary.courses} 门课程、${summary.sessions} 个时段；更新 ${summary.updated}、跳过 ${summary.skipped}")
                     flowState.clearDraft(); flowState.completed.value = true

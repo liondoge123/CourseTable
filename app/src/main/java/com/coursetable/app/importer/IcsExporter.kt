@@ -4,6 +4,7 @@ import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
 import com.coursetable.app.data.WeekType
 import com.coursetable.app.data.scheduledWeeks
+import com.coursetable.app.util.WeekUtils
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -21,6 +22,7 @@ object IcsExporter {
         sb.append("VERSION:2.0\r\n")
         sb.append("PRODID:-//CourseTable//CN\r\n")
         for (course in courses) {
+            if (settings.timetableId > 0 && course.timetableId != settings.timetableId) continue
             if (course.selectedWeeksCsv.isBlank()) {
                 appendEvent(sb, settings, course)
             } else {
@@ -61,12 +63,7 @@ object IcsExporter {
     }
 
     private fun firstOccurrence(settings: AppSettings, startWeek: Int, dayOfWeek: Int): LocalDate? {
-        val startDay = settings.semesterStart.dayOfWeek.value
-        var date = settings.semesterStart.plusDays(((startWeek - 1) * 7).toLong())
-        var offset = dayOfWeek - startDay
-        if (offset < 0) offset += 7
-        date = date.plusDays(offset.toLong())
-        return date
+        return WeekUtils.dateOfWeek(settings.semesterStart, startWeek, dayOfWeek)
     }
 
     private fun occurrencesInRange(startWeek: Int, endWeek: Int, weekType: Int): Int {

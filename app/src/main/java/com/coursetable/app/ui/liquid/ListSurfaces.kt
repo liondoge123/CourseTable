@@ -59,7 +59,8 @@ internal fun Modifier.listItemSurface(
     val dark = colors.isDark
     val resolved = material ?: if (LocalBackInOverlay.current) ListItemMaterial.Glass else ListItemMaterial.Page
     val strength = opacity.coerceIn(0f, 1f)
-    val backdrop = LocalOverlayGlassBackdrop.current ?: LocalGlassBackdrop.current
+    val overlayBackdrop = LocalOverlayGlassBackdrop.current
+    val backdrop = overlayBackdrop ?: LocalGlassBackdrop.current
     val capability = LocalGlassCapability.current
     val preferReadability = LocalReadableOverlayGlass.current
     var result = this.clip(shape)
@@ -70,7 +71,7 @@ internal fun Modifier.listItemSurface(
             effects = {
                 colorControls(brightness = if (dark || preferReadability) 0f else 0.035f,
                     saturation = if (preferReadability) 1f else 1.12f)
-                blur((if (preferReadability) 40.dp else 32.dp).toPx())
+                if (overlayBackdrop == null) blur((if (preferReadability) 40.dp else 32.dp).toPx())
                 if (!preferReadability && capability == GlassCapability.FULL) {
                     lens(refractionHeight = 6.dp.toPx(), refractionAmount = 8.dp.toPx(), depthEffect = true)
                 }
@@ -96,7 +97,12 @@ internal fun Modifier.listItemSurface(
         val alpha = if (resolved == ListItemMaterial.Glass) { if (dark) 0.055f else 0.16f } else { if (dark) 0.025f else 0.07f }
         listOf(Color.White.copy(alpha = alpha * strength), Color.White.copy(alpha = 0.015f * strength))
     }
-    result = result.background(Brush.verticalGradient(wash))
+    // Glass rows use one wash throughout; reserve vertical shading for page materials.
+    result = if (resolved == ListItemMaterial.Glass && !selected) {
+        result.background(wash.first())
+    } else {
+        result.background(Brush.verticalGradient(wash))
+    }
     return result
 }
 

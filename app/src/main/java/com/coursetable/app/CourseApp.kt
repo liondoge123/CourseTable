@@ -15,11 +15,16 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 class CourseApp : Application() {
+    internal val timetableScrollResets = com.coursetable.app.ui.TimetableScrollResets()
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
+        applicationScope.launch {
+            try { wallpaperRepository.initialize() }
+            catch (e: java.io.IOException) { android.util.Log.w("Wallpaper", "Wallpaper cleanup failed", e) }
+        }
         com.coursetable.app.importer.TinyTextRecognizer.initialize(this)
         // pdfbox-android 需要从 assets 加载字体度量(.afm)等资源，必须在使用前初始化
         try {
@@ -50,6 +55,15 @@ class CourseApp : Application() {
     val database: AppDatabase by lazy { AppDatabase.get(this) }
     val settingsRepository: SettingsRepository by lazy {
         SettingsRepository(this, database.timetableDao())
+    }
+    val wallpaperRepository: com.coursetable.app.data.WallpaperRepository by lazy {
+        com.coursetable.app.data.WallpaperRepository(this, settingsRepository)
+    }
+    internal fun discardWallpaperDraft(id: String, repository: com.coursetable.app.data.WallpaperRepository = wallpaperRepository) {
+        applicationScope.launch {
+            try { repository.discard(id) }
+            catch (e: java.io.IOException) { android.util.Log.w("Wallpaper", "Draft cleanup failed", e) }
+        }
     }
     val timetableRepository: TimetableRepository by lazy {
         TimetableRepository(database.timetableDao(), database.courseDao())

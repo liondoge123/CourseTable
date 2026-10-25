@@ -292,6 +292,7 @@ internal fun UnifiedImportReview(
         onRejected = { dismiss() },
         onBack = { dismiss() }
     )
+    PageDockVisibility(reviewBack.phase != BackPhase.COMMITTING && !reviewBack.completed)
     FullscreenPageContainer(Modifier.testTag("import-review-page").predictiveBackTransform(reviewBack, BackPresentation.PAGE)) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp

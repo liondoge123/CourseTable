@@ -50,6 +50,9 @@ Use the project script under PowerShell 7 (`pwsh`) for both preview packages and
 # Fast test package: increment the internal build number and build arm64 only.
 pwsh .\scripts\build-apk.ps1 preview
 
+# Populate missing dependency/tool cache entries after setup or a cache migration.
+pwsh .\scripts\build-apk.ps1 preview -Online
+
 # Formal release: run the full validation and build every configured ABI.
 pwsh .\scripts\build-apk.ps1 release
 
@@ -58,6 +61,11 @@ pwsh .\scripts\build-apk.ps1 release -VersionName 1.6.0
 ```
 
 From CMD or classic shell, you can also run `.\scripts\build-apk.cmd <preview|release>` directly (prioritizes `pwsh` 7 and falls back to `powershell` 5.1).
+
+Both modes resolve dependencies offline by default. Use `-Online` when the selected
+Gradle user home needs missing dependencies or tool metadata; Gradle still reuses
+cached artifacts. After a successful online build, the default offline command can
+be used again for the same build configuration.
 
 Preview APKs use the same package name and signing certificate as formal releases, so
 they update the installed app. Their unique `preview-b{versionCode}` filename avoids

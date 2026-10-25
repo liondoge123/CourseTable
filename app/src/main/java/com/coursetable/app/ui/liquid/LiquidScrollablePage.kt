@@ -1,6 +1,7 @@
 package com.coursetable.app.ui.liquid
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +42,8 @@ internal fun LiquidScrollablePage(
     topBarPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     floatingTopBar: Boolean = false,
     topBar: (@Composable () -> Unit)? = null,
+    background: @Composable (Modifier) -> Unit = { LiquidAmbientBackground(it) },
+    wallpaperVisible: Boolean = false,
     content: @Composable (PaddingValues) -> Unit
 ) {
     val backdrop = rememberLayerBackdrop()
@@ -63,15 +66,19 @@ internal fun LiquidScrollablePage(
         Box(modifier.fillMaxSize().clipToBounds()) {
             // This recorder excludes both the fading material and the controls above it.
             Box(Modifier.fillMaxSize().layerBackdrop(backdrop).consumeWindowInsets(insets)) {
-                LiquidAmbientBackground(Modifier.layerBackdrop(chromeBackdrop))
-                content(contentPadding)
+                // Background-only source for glass controls excludes the controls themselves.
+                val backgroundBackdrop = rememberLayerBackdrop()
+                CompositionLocalProvider(LocalGlassBackdrop provides backgroundBackdrop) {
+                    background(Modifier.layerBackdrop(chromeBackdrop).layerBackdrop(backgroundBackdrop))
+                    content(contentPadding)
+                }
             }
             if (topBar != null) {
                 // Repaint only the fixed header strip using the same full-window background.
                 // This hides scrolling rows without adding any blur or a separate panel edge.
                 val headerTop = with(density) { safe.calculateTopPadding().toPx() }
                 val headerBottom = with(density) { topHeight.toPx() }
-                if (!floatingTopBar) LiquidAmbientBackground(Modifier.drawWithContent {
+                if (!floatingTopBar) background(Modifier.drawWithContent {
                     clipRect(top = headerTop, bottom = headerBottom) {
                         this@drawWithContent.drawContent()
                     }
@@ -89,7 +96,10 @@ internal fun LiquidScrollablePage(
                     }.padding(topBarPadding)) { topBar() }
                 }
             }
-            if (statusHeight > 0.dp) LiquidTopEdge(backdrop, statusHeight)
+            if (statusHeight > 0.dp) LiquidTopEdge(backdrop, statusHeight, wallpaperVisible)
+            if (wallpaperVisible) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .background(LiquidTheme.colorScheme.background.copy(alpha = .85f)))
         }
     }
 }
@@ -112,7 +122,7 @@ internal fun PaddingValues.pagePadding(
 
 /** Blur and its fade are confined to the system status bar, never the app's header. */
 @Composable
-private fun LiquidTopEdge(backdrop: LayerBackdrop, statusHeight: Dp) {
+private fun LiquidTopEdge(backdrop: LayerBackdrop, statusHeight: Dp, wallpaperVisible: Boolean = false) {
     val colors = LiquidTheme.colorScheme
     val capability = LocalGlassCapability.current
     val fadeHeight = minOf(16.dp, statusHeight)
@@ -131,13 +141,17 @@ private fun LiquidTopEdge(backdrop: LayerBackdrop, statusHeight: Dp) {
             drawBackdrop()
         },
         onDrawSurface = {
-            drawRect(colors.background.copy(alpha = if (colors.isDark) .18f else .22f))
-            drawRect(Brush.verticalGradient(listOf(
-                Color.White.copy(alpha = if (colors.isDark) .025f else .08f), Color.Transparent
-            )))
+            // Wallpaper already includes the user's mask. Only fade the sampled blur
+            // over it; an additional theme-colour surface would hide the image.
+            if (!wallpaperVisible) {
+                drawRect(colors.background.copy(alpha = if (colors.isDark) .18f else .22f))
+                drawRect(Brush.verticalGradient(listOf(
+                    Color.White.copy(alpha = if (colors.isDark) .025f else .08f), Color.Transparent
+                )))
+            }
         }
     ) else Modifier.drawWithContent {
-        drawRect(colors.background.copy(alpha = .94f))
+        if (!wallpaperVisible) drawRect(colors.background.copy(alpha = .94f))
         drawContent()
     }
     Box(Modifier.fillMaxWidth().height(statusHeight)

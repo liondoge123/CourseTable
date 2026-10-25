@@ -9,8 +9,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -18,6 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.coursetable.app.ui.theme.LiquidTheme
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -43,13 +51,26 @@ internal val LocalGlassCapability = staticCompositionLocalOf { GlassCapability.S
 internal class GlassOverlayEntry(
     val id: Any,
     val destination: OverlayDestination,
+    hidesDock: Boolean = destination == OverlayDestination.SHEET,
     val content: @Composable () -> Unit
-)
+) {
+    var hidesDock by mutableStateOf(hidesDock)
+    var backCommitted by mutableStateOf(false)
+}
 
 @Stable
 internal class GlassOverlayController {
     private val _entries = mutableStateListOf<GlassOverlayEntry>()
     val entries: List<GlassOverlayEntry> get() = _entries
+    private val dockBlockingPages = mutableStateListOf<Any>()
+    val hidesDock: Boolean get() = dockBlockingPages.isNotEmpty() ||
+        entries.any { it.hidesDock && !it.backCommitted }
+
+    fun setPageDockHidden(id: Any, hidden: Boolean) {
+        if (hidden) {
+            if (id !in dockBlockingPages) dockBlockingPages += id
+        } else dockBlockingPages.remove(id)
+    }
 
     fun add(entry: GlassOverlayEntry) {
         if (_entries.none { it.id === entry.id }) _entries += entry
@@ -61,6 +82,7 @@ internal class GlassOverlayController {
 }
 
 internal val LocalGlassOverlayController = staticCompositionLocalOf<GlassOverlayController?> { null }
+internal val LocalGlassOverlayEntry = staticCompositionLocalOf<GlassOverlayEntry?> { null }
 
 /**
  * Root liquid-glass host. The scene recorder is attached explicitly with
@@ -127,6 +149,14 @@ private fun BoxScope.OverlaySceneStack(
     // a different slot would dispose and recreate its portal registrations on every presentation.
     val sceneBackdrop = rememberLayerBackdrop()
     val recordsThisLevel = entries.size > level
+    val blurRadius = with(LocalDensity.current) { 40.dp.toPx() }
+    val sceneBlur = remember(blurRadius) { BlurEffect(blurRadius, blurRadius, TileMode.Clamp) }
+    SideEffect {
+        // Blur the complete opaque scene before sampling a panel from it. Blurring
+        // a padded panel crop introduces transparent pixels outside screen bounds,
+        // which lets the original sharp scene show through at the left/bottom rim.
+        sceneBackdrop.graphicsLayer.renderEffect = if (recordsThisLevel) sceneBlur else null
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -147,6 +177,7 @@ private fun BoxScope.OverlaySceneStack(
         key(entry.id) {
             CompositionLocalProvider(
                 LocalOverlayGlassBackdrop provides sceneBackdrop,
+                LocalGlassOverlayEntry provides entry,
                 LocalOverlayBackActive provides (level == entries.lastIndex),
                 LocalBackInOverlay provides true
             ) {
@@ -189,14 +220,14 @@ fun LiquidAmbientBackground(modifier: Modifier = Modifier) {
         drawRect(colors.background)
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(colors.primary.copy(alpha = if (colors.isDark) 0.20f else 0.16f), Color.Transparent),
+                colors = listOf(colors.onSurface.copy(alpha = if (colors.isDark) 0.025f else 0.015f), Color.Transparent),
                 center = Offset(size.width * 0.12f, size.height * 0.08f),
                 radius = size.maxDimension * 0.72f
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(colors.primaryContainer.copy(alpha = if (colors.isDark) 0.22f else 0.42f), Color.Transparent),
+                colors = listOf(colors.surfaceContainerHighest.copy(alpha = if (colors.isDark) 0.12f else 0.25f), Color.Transparent),
                 center = Offset(size.width * 0.92f, size.height * 0.82f),
                 radius = size.maxDimension * 0.68f
             )
@@ -207,6 +238,7 @@ fun LiquidAmbientBackground(modifier: Modifier = Modifier) {
 @Composable
 internal fun GlassOverlayPortal(
     destination: OverlayDestination = OverlayDestination.DIALOG,
+    hidesDock: Boolean = destination == OverlayDestination.SHEET,
     content: @Composable () -> Unit
 ) {
     if (!LocalBackLayerActive.current) return
@@ -217,8 +249,9 @@ internal fun GlassOverlayPortal(
         return
     }
     val entry = remember(controller, destination) {
-        GlassOverlayEntry(Any(), destination) { currentContent.value.invoke() }
+        GlassOverlayEntry(Any(), destination, hidesDock) { currentContent.value.invoke() }
     }
+    SideEffect { entry.hidesDock = hidesDock }
     DisposableEffect(controller, entry) {
         controller.add(entry)
         onDispose { controller.remove(entry) }

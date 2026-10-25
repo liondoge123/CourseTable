@@ -10,10 +10,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
@@ -39,7 +40,8 @@ internal fun TimetableDayHeader(
                 fontSize = 11.sp,
                 lineHeight = 13.sp,
                 fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                color = if (isToday) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.onSurfaceVariant
+                color = if (LocalWallpaperActive.current) LiquidTheme.colorScheme.onSurface
+                    else if (isToday) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.onSurfaceVariant
             )
             if (date != null) {
                 Spacer(Modifier.height(2.dp))
@@ -48,7 +50,7 @@ internal fun TimetableDayHeader(
                         .height(26.dp)
                         .widthIn(min = 26.dp)
                         .clip(CircleShape)
-                        .background(if (isToday) LiquidTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .background(if (isToday) LiquidTheme.colorScheme.primary.copy(alpha = if (LocalWallpaperActive.current) 1f else 0.12f) else Color.Transparent)
                         .padding(horizontal = 3.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -59,7 +61,9 @@ internal fun TimetableDayHeader(
                         maxLines = 1,
                         softWrap = false,
                         fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isToday) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.onSurfaceVariant
+                        color = if (isToday && LocalWallpaperActive.current) LiquidTheme.colorScheme.onPrimary
+                            else if (LocalWallpaperActive.current) LiquidTheme.colorScheme.onSurface
+                            else if (isToday) LiquidTheme.colorScheme.primary else LiquidTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -82,11 +86,12 @@ internal fun TimetablePeriodLabel(
                 fontSize = 12.sp,
                 lineHeight = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = LiquidTheme.colorScheme.primary
+                color = if (LocalWallpaperActive.current) LiquidTheme.colorScheme.onSurface else LiquidTheme.colorScheme.primary
             )
             if (startTime != null && endTime != null) {
-                Text(startTime, fontSize = 10.sp, lineHeight = 11.sp, color = LiquidTheme.colorScheme.onSurfaceVariant)
-                Text(endTime, fontSize = 10.sp, lineHeight = 11.sp, color = LiquidTheme.colorScheme.onSurfaceVariant)
+                val axisColor = if (LocalWallpaperActive.current) LiquidTheme.colorScheme.onSurface else LiquidTheme.colorScheme.onSurfaceVariant
+                Text(startTime, fontSize = 10.sp, lineHeight = 11.sp, color = axisColor)
+                Text(endTime, fontSize = 10.sp, lineHeight = 11.sp, color = axisColor)
             }
         }
     }
@@ -115,11 +120,15 @@ internal fun TimetableCourseCardSurface(
     onClick: () -> Unit
 ) {
     val isDark = LiquidTheme.colorScheme.isDark
-    val cardColor = if (dimmed) {
-        lerp(LiquidTheme.colorScheme.surface, LiquidTheme.colorScheme.onSurfaceVariant, if (isDark) 0.12f else 0.08f)
+    val baseSurface = if (LocalWallpaperActive.current) LiquidTheme.colorScheme.surface.copy(alpha = 1f)
+        else LiquidTheme.colorScheme.surface
+    val opaqueCardColor = if (dimmed) {
+        lerp(baseSurface, LiquidTheme.colorScheme.onSurfaceVariant, if (isDark) 0.12f else 0.08f)
     } else {
-        lerp(LiquidTheme.colorScheme.surface, accent, if (isDark) 0.28f else 0.16f)
+        lerp(baseSurface, accent, if (isDark) 0.28f else 0.16f)
     }
+    val cardColor = if (LocalWallpaperActive.current) opaqueCardColor.copy(
+        alpha = LocalWallpaperCardOpacity.current.coerceIn(0f, 1f)) else opaqueCardColor
     val textAlpha = if (dimmed) 0.58f else 1f
     val metadataColor = courseMetadataColor()
     val teacherColor = if (dimmed) LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f * textAlpha) else metadataColor
@@ -133,7 +142,7 @@ internal fun TimetableCourseCardSurface(
     }
     val shape = RoundedCornerShape(6.dp)
     Box(
-        modifier
+        modifier = modifier
             .clip(shape)
             .background(cardColor)
             .border(1.dp, if (dimmed) LiquidTheme.colorScheme.outlineVariant else accent.copy(alpha = 0.32f), shape)
@@ -143,14 +152,8 @@ internal fun TimetableCourseCardSurface(
         val barWidth = 3.5.dp
         if (!dimmed) {
             if (progress != null) {
-                val animatedProgress by animateFloatAsState(
-                    targetValue = progress,
-                    animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-                    label = "course_progress"
-                )
-                Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().width(barWidth).background(accent.copy(alpha = 0.22f))) {
-                    Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().fillMaxHeight(animatedProgress.coerceIn(0f, 1f)).background(accent))
-                }
+                TimetableCourseProgress(progress, accent,
+                    Modifier.align(Alignment.CenterStart).fillMaxHeight().width(barWidth))
             } else {
                 Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().width(barWidth).background(accent))
             }
@@ -183,4 +186,15 @@ internal fun TimetableCourseCardSurface(
             )
         }
     }
+}
+
+/** Progress changes invalidate drawing only, leaving card text and layout cached. */
+@Composable
+internal fun TimetableCourseProgress(progress: Float, accent: Color, modifier: Modifier = Modifier) {
+    val animated = animateFloatAsState(progress,
+        animationSpec = tween(600, easing = FastOutSlowInEasing), label = "course_progress")
+    Box(modifier.drawBehind {
+        drawRect(accent.copy(alpha = 0.22f))
+        drawRect(accent, size = Size(size.width, size.height * animated.value.coerceIn(0f, 1f)))
+    })
 }

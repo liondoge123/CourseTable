@@ -155,6 +155,8 @@ fun rememberModalBottomSheetState(skipPartiallyExpanded: Boolean = true) =
 
 @Composable
 @Suppress("UNUSED_PARAMETER")
+// canDismiss is a pure guard. Present confirmation UI in onDismissRejected, which
+// runs after a rejected predictive preview has returned to its resting pose.
 fun ModalBottomSheet(
     onDismissRequest: () -> Unit,
     sheetState: LiquidSheetState = rememberModalBottomSheetState(),
@@ -162,6 +164,7 @@ fun ModalBottomSheet(
     shape: Shape = RoundedRectangle(32.dp),
     canDismiss: () -> Boolean = { true },
     preferReadability: Boolean = false,
+    onDismissRejected: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     var drag by remember { mutableFloatStateOf(0f) }
@@ -174,8 +177,9 @@ fun ModalBottomSheet(
         MutableTransitionState(false).apply { targetState = true }
     }
     val currentCanDismiss by androidx.compose.runtime.rememberUpdatedState(canDismiss)
+    val currentDismissRejected by androidx.compose.runtime.rememberUpdatedState(onDismissRejected)
     fun dismissAnimated(afterAction: (() -> Unit)? = null, checkDismiss: Boolean = true) {
-        if (checkDismiss && !currentCanDismiss()) { drag = 0f; return }
+        if (checkDismiss && !currentCanDismiss()) { drag = 0f; currentDismissRejected(); return }
         if (!dismissRequested) {
             dismissRequested = true
             pendingDismissAction = afterAction
@@ -236,10 +240,11 @@ fun ModalBottomSheet(
         }
     }
 
-    GlassOverlayPortal(OverlayDestination.SHEET) {
+    GlassOverlayPortal(OverlayDestination.SHEET, hidesDock = !dismissRequested || pendingDismissAction != null) {
         val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
             canCommit = { currentCanDismiss() },
+            onRejected = { currentDismissRejected() },
             onBack = { dismissAnimated(checkDismiss = false) }
         )
         CompositionLocalProvider(LocalDialogDismissController provides dismissController) {
@@ -389,7 +394,8 @@ fun AlertDialog(
         }
     }
 
-    GlassOverlayPortal(OverlayDestination.DIALOG) {
+    GlassOverlayPortal(OverlayDestination.DIALOG,
+        hidesDock = fixedEditorFrame && (!dismissRequested || pendingDismissAction != null)) {
         val back = rememberPredictiveBack(
             enabled = visibility.currentState || visibility.targetState,
             canCommit = { onBackRequest == null },

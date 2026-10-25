@@ -23,6 +23,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,6 +53,7 @@ import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.ThemeColor
 import com.coursetable.app.ui.theme.ThemeMode
+import com.coursetable.app.data.GlassEffect
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.time.Instant
@@ -68,7 +70,9 @@ import kotlinx.coroutines.withContext
 private enum class SettingsSubpage {
     TIMETABLE_MANAGE,
     PERIOD_TIMES,
-    ABOUT
+    PERMISSIONS,
+    ABOUT,
+    WALLPAPER
 }
 
 @Composable
@@ -118,14 +122,10 @@ fun SettingsScreen(
     if (activeSubpage != null) {
         displayedSubpage = activeSubpage
     }
-    var showPermDialog by remember { mutableStateOf(false) }
+    val subpageScrollVisit = rememberPageScrollVisit(activeSubpage?.name)
 
     DisposableEffect(Unit) {
         onDispose { onSubpageChanged(false) }
-    }
-
-    LaunchedEffect(activeSubpage) {
-        onSubpageChanged(activeSubpage != null)
     }
 
     // 提醒排程状态（设置变更后延迟刷新，等待异步重排完成）
@@ -166,15 +166,17 @@ fun SettingsScreen(
                 val backup = tables.map { t ->
                     com.coursetable.app.importer.TimetableBackup(t, courseRepo.byTimetableOnce(t.id))
                 }
-                val json = BackupManager.export(backup)
+                val json = withContext(Dispatchers.Default) { BackupManager.export(backup) }
                 val total = backup.sumOf { it.courses.size }
                 withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                    requireNotNull(context.contentResolver.openOutputStream(uri)) { "无法写入所选文件" }.use { os ->
                         os.write(json.toByteArray())
                         os.flush()
                     }
                 }
                 toast("已导出 ${tables.size} 个课表 · $total 门课程")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 toast("导出失败：${e.message}")
             }
@@ -211,15 +213,18 @@ fun SettingsScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             try {
-                val courses = courseRepo.allOnce()
-                val ics = IcsExporter.export(settings, courses)
+                val exportSettings = settings
+                val courses = courseRepo.byTimetableOnce(exportSettings.timetableId)
+                val ics = withContext(Dispatchers.Default) { IcsExporter.export(exportSettings, courses) }
                 withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                    requireNotNull(context.contentResolver.openOutputStream(uri)) { "无法写入所选文件" }.use { os ->
                         os.write(ics.toByteArray())
                         os.flush()
                     }
                 }
                 toast("已导出 ${courses.size} 门课程到日历")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 toast("导出失败：${e.message}")
             }
@@ -255,58 +260,6 @@ fun SettingsScreen(
         }
     }
 
-
-    if (showPermDialog) {
-        AlertDialog(
-            onDismissRequest = { showPermDialog = false },
-            title = { Text("权限检查") },
-            text = {
-                Column(Modifier.heightIn(max = 440.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.Gap)) {
-                    PermRow(
-                        icon = Icons.Filled.Notifications,
-                        title = "通知权限",
-                        status = if (permNotification) "已开启" else "未开启",
-                        ok = permNotification,
-                        error = !permNotification,
-                        hint = "没有它无法发出任何提醒",
-                        onClick = { ReminderScheduler.openAppNotificationSettings(context) }
-                    )
-                    PermRow(
-                        icon = Icons.Filled.NotificationsActive,
-                        title = "横幅通知",
-                        status = if (permChannelHigh) "已开启" else "未开启",
-                        ok = permChannelHigh,
-                        error = !permChannelHigh,
-                        hint = "没有它提醒只出现在状态栏，不会从顶部弹出",
-                        onClick = { ReminderScheduler.openChannelSettings(context) }
-                    )
-                    PermRow(
-                        icon = Icons.Filled.Schedule,
-                        title = "精确闹钟",
-                        status = if (permExactAlarm) "已允许" else "未允许",
-                        ok = permExactAlarm,
-                        error = !permExactAlarm,
-                        hint = if (permExactAlarm) "课程提醒可按设定时间触发" else "未允许时仍会提醒，但系统可能延迟",
-                        onClick = { ReminderScheduler.openExactAlarmSettings(context) }
-                    )
-                    PermRow(
-                        icon = Icons.Filled.AutoStart,
-                        title = "自启动",
-                        status = "请确认 →",
-                        ok = false,
-                        error = false,
-                        hint = "国产系统需要，允许后 App 被杀也能收到提醒",
-                        onClick = { ReminderScheduler.openAutoStartSettings(context) }
-                    )
-                }
-            },
-            confirmButton = {
-                val dismissController = LocalDialogDismissController.current
-                TextButton(onClick = { dismissController?.dismiss() ?: run { showPermDialog = false } }) { Text("完成") }
-            }
-        )
-    }
 
     if (showClearConfirmDialog) {
         AlertDialog(
@@ -362,62 +315,76 @@ fun SettingsScreen(
 
     PredictivePageTransition(
         targetState = activeSubpage != null,
-        onBack = { activeSubpage = null }
+        onBack = { activeSubpage = null },
+        onMountedChanged = onSubpageChanged
     ) { isChild ->
         if (isChild) {
-            when (displayedSubpage ?: activeSubpage) {
-                SettingsSubpage.TIMETABLE_MANAGE -> {
-                    TimetableManageScreen(
-                        timetables = timetables,
-                        activeId = settings.timetableId,
-                        onBack = { activeSubpage = null },
-                        onSwitch = { id -> scope.launch { settingsRepo.setActiveTimetable(id) } },
-                        onCreate = { name ->
-                            scope.launch {
-                                val id = timetableRepo.create(name)
-                                settingsRepo.setActiveTimetable(id)
-                            }
-                        },
-                        onRename = { id, name -> scope.launch { timetableRepo.rename(id, name) } },
-                        onDelete = { table ->
-                            scope.launch {
-                                timetableRepo.delete(table.id)
-                                if (table.id == settings.timetableId) {
-                                    timetableRepo.allOnce().firstOrNull()?.let {
-                                        settingsRepo.setActiveTimetable(it.id)
+            CompositionLocalProvider(LocalPageScrollKey provides subpageScrollVisit) {
+                when (displayedSubpage ?: activeSubpage) {
+                    SettingsSubpage.WALLPAPER -> WallpaperEditorScreen(settings, courses.filter { it.timetableId == settings.timetableId },
+                        onBack = { activeSubpage = null })
+                    SettingsSubpage.TIMETABLE_MANAGE -> {
+                        TimetableManageScreen(
+                            timetables = timetables,
+                            activeId = settings.timetableId,
+                            onBack = { activeSubpage = null },
+                            onSwitch = { id -> scope.launch { settingsRepo.setActiveTimetable(id) } },
+                            onCreate = { name ->
+                                scope.launch {
+                                    val id = timetableRepo.create(name)
+                                    settingsRepo.setActiveTimetable(id)
+                                }
+                            },
+                            onRename = { id, name -> scope.launch { timetableRepo.rename(id, name) } },
+                            onDelete = { table ->
+                                scope.launch {
+                                    timetableRepo.delete(table.id)
+                                    if (table.id == settings.timetableId) {
+                                        timetableRepo.allOnce().firstOrNull()?.let {
+                                            settingsRepo.setActiveTimetable(it.id)
+                                        }
                                     }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
+                    SettingsSubpage.PERIOD_TIMES -> {
+                        val timetableId = settings.timetableId
+                        PeriodTimeSchemesScreen(
+                            schemes = timeSchemes,
+                            periods = settings.periods,
+                            durationMinutes = settings.periodDurationMinutes,
+                            currentSchemeId = settings.activePeriodSchemeId,
+                            onSave = { scheme ->
+                                val normalized = if (scheme.isDefault) scheme.copy(
+                                    id = com.coursetable.app.data.PeriodTimeScheme.defaultId(timetableId)
+                                ) else scheme
+                                settingsRepo.savePeriodTimeScheme(normalized)
+                            },
+                            onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
+                            onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },
+                            onDelete = { settingsRepo.deletePeriodTimeScheme(it, timetableId) },
+                            onDismiss = { activeSubpage = null }
+                        )
+                    }
+                    SettingsSubpage.PERMISSIONS -> {
+                        PermissionCheckScreen(
+                            notificationEnabled = permNotification,
+                            bannerEnabled = permChannelHigh,
+                            exactAlarmAllowed = permExactAlarm,
+                            onBack = { activeSubpage = null },
+                            bottomContentPadding = bottomContentPadding
+                        )
+                    }
+                    SettingsSubpage.ABOUT -> {
+                        AboutScreen(
+                            appVersionName = appVersionName,
+                            onBack = { activeSubpage = null },
+                            bottomContentPadding = bottomContentPadding
+                        )
+                    }
+                    null -> Unit
                 }
-                SettingsSubpage.PERIOD_TIMES -> {
-                    val timetableId = settings.timetableId
-                    PeriodTimeSchemesScreen(
-                        schemes = timeSchemes,
-                        periods = settings.periods,
-                        durationMinutes = settings.periodDurationMinutes,
-                        currentSchemeId = settings.activePeriodSchemeId,
-                        onSave = { scheme ->
-                            val normalized = if (scheme.isDefault) scheme.copy(
-                                id = com.coursetable.app.data.PeriodTimeScheme.defaultId(timetableId)
-                            ) else scheme
-                            settingsRepo.savePeriodTimeScheme(normalized)
-                        },
-                        onApply = { settingsRepo.applyPeriodTimeScheme(timetableId, it) },
-                        onSaveCurrent = { settingsRepo.saveCurrentPeriodTimeScheme(timetableId, it) },
-                        onDelete = { settingsRepo.deletePeriodTimeScheme(it, timetableId) },
-                        onDismiss = { activeSubpage = null }
-                    )
-                }
-                SettingsSubpage.ABOUT -> {
-                    AboutScreen(
-                        appVersionName = appVersionName,
-                        onBack = { activeSubpage = null },
-                        bottomContentPadding = bottomContentPadding
-                    )
-                }
-                null -> Unit
             }
         } else {
             LiquidScrollablePage { pageInsets ->
@@ -566,34 +533,20 @@ fun SettingsScreen(
                     subtitle = statusLine,
                     onClick = { statusTick++ }
                 )
-
-                SettingsDivider()
-                SettingItem(
-                    icon = Icons.Filled.Send,
-                    title = "发送测试提醒",
-                    subtitle = "30 秒后收到通知则说明链路正常",
-                    onClick = {
-                        ReminderScheduler.scheduleTest(context)
-                        toast("已排定 30 秒后的测试提醒，请稍后查看通知栏")
-                    }
-                )
-
-                // 权限检查（单一入口弹窗）
-                val permIssues = listOf(permNotification, permChannelHigh, permExactAlarm).count { !it }
-                val permSummary = when {
-                    permIssues > 0 -> "$permIssues 项待处理"
-                    else -> "全部正常"
-                }
-                SettingsDivider()
-                SettingItem(
-                    icon = Icons.Filled.Security,
-                    title = "权限检查",
-                    subtitle = permSummary,
-                    tint = if (permIssues > 0) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurface,
-                    onClick = { showPermDialog = true }
-                )
             }
+            val permIssues = listOf(permNotification, permChannelHigh, permExactAlarm).count { !it }
+            SettingsDivider()
+            SettingItem(
+                icon = Icons.Filled.Security,
+                title = "权限检查",
+                subtitle = if (permIssues > 0) "$permIssues 项待处理" else "可检测项均已开启",
+                tint = if (permIssues > 0) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurface,
+                onClick = {
+                    permTick++
+                    activeSubpage = SettingsSubpage.PERMISSIONS
+                }
+            )
         }
 
         SettingsGroup(title = "外观") {
@@ -609,6 +562,28 @@ fun SettingsScreen(
             ThemeColorItem(
                 selected = ThemeColor.fromKey(settings.themeColor),
                 onSelect = { color -> scope.launch { settingsRepo.save(themeColor = color.key) } }
+            )
+            SettingsDivider()
+            SettingsChoiceItem(
+                id = "glass-effect",
+                icon = Icons.Filled.Palette,
+                title = "玻璃效果",
+                selectedKey = GlassEffect.fromKey(settings.glassEffect).key,
+                choices = GlassEffect.entries.map { SettingsChoice(it.key, it.label) },
+                onSelect = { scope.launch { settingsRepo.save(glassEffect = it) } }
+            )
+            SettingsDivider()
+            val wallpaperThumbnail = rememberWallpaperBitmap(settings.wallpaper)
+            SettingItem(
+                icon = Icons.Filled.Palette,
+                title = "课表壁纸",
+                subtitle = if (settings.wallpaper == null) "未设置" else if (wallpaperThumbnail == null) "已设置 · 点此编辑或更换" else "已设置 · 所有课表共用",
+                onClick = { activeSubpage = SettingsSubpage.WALLPAPER },
+                trailing = {
+                    if (wallpaperThumbnail != null) WallpaperBackground(settings.wallpaper, wallpaperThumbnail,
+                        Modifier.size(42.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
+                    else ListItemChevron()
+                }
             )
         }
 
@@ -645,7 +620,7 @@ fun SettingsScreen(
             SettingItem(
                 icon = Icons.Filled.IosShare,
                 title = "导出 ICS 日历",
-                subtitle = "可导入系统日历",
+                subtitle = "仅导出当前课表，可导入系统日历",
                 onClick = {
                     exportIcs.launch("coursetable_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.ics")
                 }
@@ -675,53 +650,6 @@ fun SettingsScreen(
 
 
 }
-/** 权限检查弹窗中的单行：图标 + 名称/说明 + 状态文字 */
-@Composable
-private fun PermRow(
-    icon: ImageVector,
-    title: String,
-    status: String,
-    ok: Boolean,
-    error: Boolean,
-    hint: String,
-    onClick: () -> Unit
-) {
-    val statusColor = when {
-        error -> MaterialTheme.colorScheme.error
-        ok -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .listItemSurface(ListItemMaterial.Glass)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        ListItemIcon(
-            icon,
-            tint = if (error) MaterialTheme.colorScheme.error
-            else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(ListItemDefaults.IconGap))
-        Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface)
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Text(
-            text = status,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = statusColor
-        )
-    }
-}
-
 /** 轻量分组：标题、留白和细边框共同建立层级。 */
 @Composable
 private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
@@ -799,7 +727,7 @@ private fun ThemeColorItem(
             ListItemIcon(Icons.Filled.Palette, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(ListItemDefaults.IconGap))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("主题色彩", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal)
+                Text("强调色", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Normal)
                 Text(
                     text = selected.label,
                     style = MaterialTheme.typography.bodySmall,

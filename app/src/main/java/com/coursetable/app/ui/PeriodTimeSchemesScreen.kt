@@ -63,7 +63,7 @@ fun PeriodTimeSchemesScreen(
 ) {
     val availableSchemes = PeriodTimeScheme.withDefault(schemes, PeriodTimeScheme.defaultFor(0, periods, durationMinutes))
     val scope = rememberCoroutineScope()
-    val schemeListScroll = rememberScrollState()
+    val schemeListScroll = rememberPageScrollState()
     var draft by remember { mutableStateOf<PeriodTimeScheme?>(null) }
     var editingCurrent by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableStateOf<Int?>(null) }

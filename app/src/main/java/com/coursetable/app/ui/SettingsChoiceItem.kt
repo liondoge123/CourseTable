@@ -49,7 +49,6 @@ internal fun SettingsChoiceItem(
     var rowCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var touchPoint by remember { mutableStateOf<Offset?>(null) }
     var menuAlignment by remember { mutableStateOf(DropdownMenuAlignment.END) }
-    var pendingKey by remember { mutableStateOf<String?>(null) }
     val label = choices.firstOrNull { it.key == selectedKey }?.label.orEmpty()
     val colors = LiquidTheme.colorScheme
     Box {
@@ -119,19 +118,19 @@ internal fun SettingsChoiceItem(
             onDismissRequest = { expanded = false },
             anchorBounds = anchor,
             alignment = menuAlignment,
-            overlapAnchor = false,
-            onClosed = {
-                val next = pendingKey
-                pendingKey = null
-                if (next != null && next != selectedKey) onSelect(next)
-            }
+            overlapAnchor = false
         ) {
             choices.forEach { choice ->
                 DropdownMenuItem(
                     modifier = Modifier.testTag("$id-${choice.key}"),
                     text = { Text(choice.label) },
                     selected = choice.key == selectedKey,
-                    onClick = { pendingKey = choice.key; expanded = false }
+                    onClick = {
+                        if (expanded) {
+                            expanded = false
+                            if (choice.key != selectedKey) onSelect(choice.key)
+                        }
+                    }
                 )
             }
         }

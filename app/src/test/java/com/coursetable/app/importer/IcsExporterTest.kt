@@ -1,5 +1,4 @@
 package com.coursetable.app.importer
-import com.coursetable.app.data.scheduledWeeks
 
 import com.coursetable.app.data.AppSettings
 import com.coursetable.app.data.Course
@@ -14,6 +13,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IcsExporterTest {
+
+    @Test fun mondayInFirstWeekUsesTheSameDateAsTheTimetable() {
+        val course = Course(id = 1, name = "周一课程", dayOfWeek = 1, startSection = 1,
+            duration = 1, startWeek = 1, endWeek = 3)
+        val events = IcsParser.parse(IcsExporter.export(settings, listOf(course))).events
+        assertEquals(LocalDate.of(2026, 8, 31), events.single().date)
+        val restored = IcsImporter.convert(events, settings).courses.single()
+        assertEquals(listOf(1, 2, 3), restored.scheduledWeeks())
+    }
+
+    @Test fun eachSemesterStartWeekdayPreservesAllCourseWeekdays() {
+        val monday = LocalDate.of(2026, 8, 31)
+        for (startOffset in 0..6) for (day in 1..7) {
+            val semester = settings.copy(semesterStart = monday.plusDays(startOffset.toLong()))
+            val course = Course(id = day.toLong(), name = "课程", dayOfWeek = day,
+                startSection = 1, duration = 1, startWeek = 2, endWeek = 4,
+                weekType = WeekType.EVEN.code)
+            val events = IcsParser.parse(IcsExporter.export(semester, listOf(course))).events
+            assertEquals(monday.plusDays(7L + day - 1), events.single().date)
+            assertEquals(listOf(2, 4), IcsImporter.convert(events, semester).courses.single().scheduledWeeks())
+        }
+    }
+
+    @Test fun activeTimetableExportExcludesOtherSemesters() {
+        val selected = settings.copy(timetableId = 7)
+        val course = Course(id = 1, timetableId = 7, name = "当前课表", dayOfWeek = 3,
+            startSection = 1, duration = 1, startWeek = 1, endWeek = 1)
+        val events = IcsParser.parse(IcsExporter.export(selected,
+            listOf(course, course.copy(id = 2, timetableId = 8, name = "其他学期")))).events
+        assertEquals(listOf("当前课表"), events.map { it.summary })
+        assertEquals(LocalDate.of(2026, 9, 2), events.single().date)
+    }
 
     @Test fun irregularWeeksRoundTripWithoutExtraOccurrences() {
         val course = Course(id = 3, name = "选修", dayOfWeek = 3, startSection = 1,

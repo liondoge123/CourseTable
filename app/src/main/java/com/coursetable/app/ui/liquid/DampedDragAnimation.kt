@@ -2,12 +2,12 @@ package com.coursetable.app.ui.liquid
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.MutatorMutex
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -37,7 +37,8 @@ internal class DampedDragAnimation(
     private val pressProgressAnimation = Animatable(0f, 0.001f)
     private val scaleXAnimation = Animatable(initialScale, 0.001f)
     private val scaleYAnimation = Animatable(initialScale, 0.001f)
-    private val mutatorMutex = MutatorMutex()
+    private var releaseJob: Job? = null
+    private var pressGeneration = 0
     private val velocityTracker = VelocityTracker()
     // Animatable.targetValue changes only after its coroutine starts. Keep the
     // requested target synchronously so clicks and rapid drag events never read
@@ -52,6 +53,11 @@ internal class DampedDragAnimation(
     val velocity: Float get() = velocityAnimation.value
 
     fun press() {
+        NavigationMotionDiagnostics.event("lens.press")
+        // A previous release can still be waiting for its lens to arrive. It must
+        // never shrink a new press, including when its shrink is already running.
+        releaseJob?.cancel()
+        pressGeneration++
         velocityTracker.resetTracking()
         animationScope.launch {
             launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
@@ -61,7 +67,9 @@ internal class DampedDragAnimation(
     }
 
     fun release() {
-        animationScope.launch {
+        releaseJob?.cancel()
+        val generation = pressGeneration
+        releaseJob = animationScope.launch {
             withFrameNanos { }
             if (value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
@@ -69,9 +77,15 @@ internal class DampedDragAnimation(
                     .filter { abs(it - requestedValue) < threshold }
                     .first()
             }
-            launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
-            launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
-            launch { scaleYAnimation.animateTo(initialScale, scaleYAnimationSpec) }
+            // Only the pending release wait is cancellable. Once shrinking, let
+            // Animatable hand its velocity to a new press, as in the original.
+            animationScope.launch releaseAnimations@ {
+                if (generation != pressGeneration) return@releaseAnimations
+                NavigationMotionDiagnostics.event("lens.release")
+                launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
+                launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
+                launch { scaleYAnimation.animateTo(initialScale, scaleYAnimationSpec) }
+            }
         }
     }
 
@@ -79,17 +93,17 @@ internal class DampedDragAnimation(
         val target = value.coerceIn(valueRange)
         requestedValue = target
         animationScope.launch {
-            launch {
-                valueAnimation.animateTo(target, valueAnimationSpec) {
-                    updateVelocity()
-                }
-            }
+            // Animatable retargets its spring with the current velocity. Cancelling
+            // the previous Job first resets that velocity and removes liquid drag.
+            valueAnimation.animateTo(target, valueAnimationSpec) { updateVelocity() }
         }
     }
 
     /** Move the lens while keeping the current pressed state until pointer-up. */
     fun movePressedToValue(value: Float) {
         val target = value.coerceIn(valueRange)
+        if (requestedValue == target) return
+        NavigationMotionDiagnostics.event("lens.move")
         requestedValue = target
         animationScope.launch {
             valueAnimation.animateTo(target, valueAnimationSpec)
@@ -97,18 +111,18 @@ internal class DampedDragAnimation(
     }
 
     fun animateToValue(value: Float) {
-        val target = value.coerceIn(valueRange)
-        requestedValue = target
-        animationScope.launch {
-            mutatorMutex.mutate {
-                press()
-                launch { valueAnimation.animateTo(target, valueAnimationSpec) }
-                if (velocity != 0f) {
-                    launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
-                }
-                release()
-            }
+        NavigationMotionDiagnostics.event("lens.animate")
+        press()
+        commitToValue(value)
+    }
+
+    /** Pointer-up continues the held spring; it must not start another press. */
+    fun commitToValue(value: Float) {
+        movePressedToValue(value)
+        if (velocity != 0f) {
+            animationScope.launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
         }
+        release()
     }
 
     private fun updateVelocity() {

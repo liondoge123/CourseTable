@@ -7,7 +7,9 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$VersionName,
 
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    [switch]$Online
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +35,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
         $forwardArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, $Mode)
         if ($VersionName) { $forwardArgs += @('-VersionName', $VersionName) }
         if ($DryRun) { $forwardArgs += '-DryRun' }
+        if ($Online) { $forwardArgs += '-Online' }
         & $pwshCommand.Source @forwardArgs
         exit $LASTEXITCODE
     } else {
@@ -153,6 +156,7 @@ if ($Mode -eq 'release' -and ([version]$nextName -le [version]$lastRelease)) {
 $displayName = if ($Mode -eq 'preview') { "$nextName-preview" } else { $nextName }
 Write-Host "Planned build: $displayName (versionCode $nextCode)"
 Write-Host "PowerShell runtime: PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+Write-Host ("Gradle dependency resolution: {0}" -f $(if ($Online) { 'online' } else { 'offline' }))
 Configure-Java
 if ($DryRun) { return }
 
@@ -171,7 +175,6 @@ $gradleArguments = if ($Mode -eq 'preview') {
         '-PcourseTableArm64Only=true'
         '--quiet'
         '--no-daemon'
-        '--offline'
     )
 } else {
     @(
@@ -181,9 +184,9 @@ $gradleArguments = if ($Mode -eq 'preview') {
         $variantTask
         '--quiet'
         '--no-daemon'
-        '--offline'
     )
 }
+if (-not $Online) { $gradleArguments += '--offline' }
 $logDirectory = Join-Path $repoRoot 'app\build\logs'
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
 $buildLog = Join-Path $logDirectory "$Mode-b$nextCode.log"

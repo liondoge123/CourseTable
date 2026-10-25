@@ -18,28 +18,33 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -51,6 +56,7 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -101,7 +107,7 @@ fun LiquidNavigationTabs(
     actionIndex: Int? = null,
     onAction: (() -> Unit)? = null,
     actionContentDescription: String? = null,
-    content: @Composable RowScope.(contentColor: Color, itemScale: Float, selectTab: (Int) -> Unit) -> Unit
+    content: @Composable RowScope.(contentColor: Color, itemScale: () -> Float, selectTab: (Int) -> Unit) -> Unit
 ) {
     require(tabCount > 0)
     require(selectableIndices.isNotEmpty())
@@ -129,16 +135,28 @@ fun LiquidNavigationTabs(
             pressedScale = 78f / 56f
         )
     }
-    var dragging by remember { mutableStateOf(false) }
-    // Match AndroidLiquidGlass' LiquidBottomTabs material. Its translucency comes
-    // primarily from sampling the real page backdrop, not from a nearly clear tint.
-    val dockContainerColor = if (colors.isDark) {
-        Color(0xFF121212).copy(alpha = 0.40f)
-    } else {
-        Color(0xFFFAFAFA).copy(alpha = 0.40f)
+    val motionObserver = NavigationMotionDiagnostics.listener
+    LaunchedEffect(motionObserver, dragAnimation) {
+        if (motionObserver != null) snapshotFlow {
+            listOf(dragAnimation.value, dragAnimation.targetValue, dragAnimation.pressProgress,
+                dragAnimation.scaleX, dragAnimation.scaleY)
+        }.collect { NavigationMotionDiagnostics.event("lens", it) }
     }
+    var dragging by remember { mutableStateOf(false) }
+    // The parent can deliver its new selection a composition later than pointer-up.
+    // Do not interpret that still-old value as a request to return to the source.
+    var pendingSelection by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val currentSelectedIndex by rememberUpdatedState(selectedIndex)
+    val currentOnSelected by rememberUpdatedState(onSelected)
+    val currentSelectableIndices by rememberUpdatedState(selectableIndices)
+    val dockContainerColor = chromeGlassTint(backdrop != null && capability != GlassCapability.STATIC)
 
-    LaunchedEffect(selectedIndex, dragging, dragAnimation) {
+    LaunchedEffect(selectedIndex, dragging, pendingSelection, dragAnimation) {
+        val pending = pendingSelection
+        if (!dragging && pending != null && selectedIndex == pending.first && selectedIndex != pending.second) {
+            return@LaunchedEffect
+        }
+        if (!dragging) pendingSelection = null
         if (!dragging && dragAnimation.targetValue != selectedIndex.toFloat()) {
             dragAnimation.animateToValue(selectedIndex.toFloat())
         }
@@ -147,12 +165,13 @@ fun LiquidNavigationTabs(
     val selectTab: (Int) -> Unit = { requestedIndex ->
         val index = requestedIndex.coerceIn(0, tabCount - 1)
         if (index in selectableIndices) {
+            pendingSelection = currentSelectedIndex to index
             dragAnimation.animateToValue(index.toFloat())
             onSelected(index)
         }
     }
 
-    fun nearestSelectableIndex(value: Float): Int = selectableIndices.minBy { index ->
+    fun nearestSelectableIndex(value: Float): Int = currentSelectableIndices.minBy { index ->
         abs(index - value)
     }
 
@@ -162,9 +181,9 @@ fun LiquidNavigationTabs(
         val barWidthPx = constraints.maxWidth.toFloat()
         val barPressedGrowthPx = with(density) { 16.dp.toPx() }
         val glassEnabled = backdrop != null && capability != GlassCapability.STATIC
-        val panelOffset = with(density) {
+        val panelOffset = {
             val fraction = (offsetAnimation.value / barWidthPx).coerceIn(-1f, 1f)
-            4.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
+            with(density) { 4.dp.toPx() } * fraction.sign * EaseOut.transform(abs(fraction))
         }
 
         val baseModifier = if (glassEnabled) {
@@ -195,14 +214,14 @@ fun LiquidNavigationTabs(
 
         Row(
             modifier = Modifier
-                .graphicsLayer { translationX = panelOffset }
+                .graphicsLayer { translationX = panelOffset() }
                 .then(if (drawSurface) baseModifier else Modifier)
                 .height(54.dp)
                 .fillMaxWidth()
                 .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            content(colors.onSurfaceVariant, 1f, selectTab)
+            content(colors.onSurfaceVariant, { 1f }, selectTab)
         }
 
         if (glassEnabled) {
@@ -210,7 +229,7 @@ fun LiquidNavigationTabs(
                 modifier = Modifier
                     .alpha(0f)
                     .layerBackdrop(tabsBackdrop)
-                    .graphicsLayer { translationX = panelOffset }
+                    .graphicsLayer { translationX = panelOffset() }
                     .drawBackdrop(
                         backdrop = backdrop,
                         shape = { shape },
@@ -232,14 +251,14 @@ fun LiquidNavigationTabs(
                     .padding(horizontal = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                content(colors.primary, lerp(1f, 1.2f, dragAnimation.pressProgress), selectTab)
+                content(colors.primary, { lerp(1f, 1.2f, dragAnimation.pressProgress) }, selectTab)
             }
         }
 
         val selectorModifier = Modifier
             .padding(horizontal = 3.dp)
             .graphicsLayer {
-                translationX = dragAnimation.value * tabWidthPx + panelOffset
+                translationX = dragAnimation.value * tabWidthPx + panelOffset()
             }
             .then(
                 if (glassEnabled && combinedBackdrop != null) {
@@ -309,61 +328,68 @@ fun LiquidNavigationTabs(
             Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .pointerInput(tabWidthPx, tabCount, selectedIndex) {
+                // Selection can change while a second finger press is held during
+                // page settling. Keep that gesture alive and read updated callbacks.
+                .pointerInput(tabWidthPx, tabCount) {
                     awaitEachGesture {
                         val down = awaitFirstDown(
                             requireUnconsumed = false,
                             pass = PointerEventPass.Initial
                         )
                         down.consume()
+                        NavigationMotionDiagnostics.event("dock.down")
+                        pendingSelection = null
                         dragging = true
                         val pressedIndex = ((down.position.x - horizontalInsetPx) / tabWidthPx)
                             .toInt().coerceIn(0, tabCount - 1)
                         dragAnimation.press()
                         dragAnimation.movePressedToValue(pressedIndex.toFloat())
 
-                        var completed = false
-                        var cancelled = false
+                        var cancelled = true
                         var totalDragX = 0f
                         var rawOffsetX = offsetAnimation.value
-                        while (!completed) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change == null) {
-                                completed = true
-                                cancelled = true
-                            } else if (!change.pressed) {
-                                change.consume()
-                                completed = true
-                            } else {
-                                val dragAmount = change.position.x - change.previousPosition.x
-                                change.consume()
-                                if (dragAmount != 0f) {
-                                    totalDragX += dragAmount
-                                    dragAnimation.updateValue(
-                                        dragAnimation.targetValue + dragAmount / tabWidthPx
-                                    )
-                                    rawOffsetX += dragAmount
-                                    scope.launch { offsetAnimation.snapTo(rawOffsetX) }
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    NavigationMotionDiagnostics.event("dock.up")
+                                    change.consume()
+                                    cancelled = false
+                                    break
+                                } else {
+                                    val dragAmount = change.position.x - change.previousPosition.x
+                                    change.consume()
+                                    if (dragAmount != 0f) {
+                                        totalDragX += dragAmount
+                                        dragAnimation.updateValue(
+                                            dragAnimation.targetValue + dragAmount / tabWidthPx
+                                        )
+                                        rawOffsetX += dragAmount
+                                        scope.launch { offsetAnimation.snapTo(rawOffsetX) }
+                                    }
                                 }
                             }
-                        }
-
-                        dragging = false
-                        if (cancelled) {
-                            dragAnimation.animateToValue(selectedIndex.toFloat())
-                        } else {
-                            val target = if (abs(totalDragX) < viewConfiguration.touchSlop) {
-                                pressedIndex
-                            } else {
-                                dragAnimation.targetValue.roundToInt().coerceIn(0, tabCount - 1)
+                            if (!cancelled) {
+                                val target = if (abs(totalDragX) < viewConfiguration.touchSlop) {
+                                    pressedIndex
+                                } else {
+                                    dragAnimation.targetValue.roundToInt().coerceIn(0, tabCount - 1)
+                                }
+                                val selectableTarget = nearestSelectableIndex(target.toFloat())
+                                pendingSelection = currentSelectedIndex to selectableTarget
+                                currentOnSelected(selectableTarget)
+                                dragAnimation.commitToValue(selectableTarget.toFloat())
                             }
-                            val selectableTarget = nearestSelectableIndex(target.toFloat())
-                            dragAnimation.animateToValue(selectableTarget.toFloat())
-                            onSelected(selectableTarget)
-                        }
-                        scope.launch {
-                            offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
+                        } finally {
+                            dragging = false
+                            if (cancelled) {
+                                pendingSelection = null
+                                dragAnimation.commitToValue(currentSelectedIndex.toFloat())
+                            }
+                            scope.launch {
+                                offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
+                            }
                         }
                     }
                 }
@@ -374,7 +400,7 @@ fun LiquidNavigationTabs(
                 modifier = Modifier
                     .padding(horizontal = 3.dp)
                     .graphicsLayer {
-                        translationX = actionIndex * tabWidthPx + panelOffset
+                        translationX = actionIndex * tabWidthPx + panelOffset()
                     }
                     .height(54.dp)
                     .fillMaxWidth(1f / tabCount)
@@ -417,6 +443,7 @@ fun LiquidGlassIconButton(
         label = "liquidActionPress"
     )
     val glassEnabled = backdrop != null && capability != GlassCapability.STATIC
+    val resolvedContainerColor = containerColor ?: chromeGlassTint(glassEnabled)
     val surfaceModifier = if (glassEnabled) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
@@ -434,10 +461,8 @@ fun LiquidGlassIconButton(
                 scaleX = scale
                 scaleY = scale
             },
-            // Keep the official material untinted by default; callers may add a
-            // translucent accent surface without changing the optical effects.
             onDrawSurface = {
-                if (containerColor != null) drawRect(containerColor)
+                drawRect(resolvedContainerColor)
             }
         ).border(BorderStroke(0.8.dp, colors.glassBorder), shape)
     } else {
@@ -448,8 +473,7 @@ fun LiquidGlassIconButton(
                 scaleY = scale
             }
             .background(
-                containerColor ?: if (colors.isDark) Color(0xFF121212).copy(alpha = 0.40f)
-                else Color(0xFFFAFAFA).copy(alpha = 0.40f),
+                resolvedContainerColor,
                 shape
             )
             .border(BorderStroke(0.8.dp, colors.glassBorder), shape)
@@ -528,23 +552,8 @@ class LiquidMetaballDockShape(
             return Outline.Generic(path)
         }
 
-        val dTouch = 2f * r1
-        val dSnap = dTouch + with(density) { 9.dp.toPx() }
-
-        // Compute current center-to-center distance d
-        val d = if (progress < snapProgress) {
-            val t = (progress / snapProgress).coerceIn(0f, 1f)
-            if (t <= 0.42f) {
-                val subT = t / 0.42f
-                lerp(0f, dTouch, subT)
-            } else {
-                val subT = (t - 0.42f) / 0.58f
-                lerp(dTouch, dSnap, subT)
-            }
-        } else {
-            val t = ((progress - snapProgress) / (1f - snapProgress)).coerceAtLeast(0f)
-            lerp(dSnap, maxBulbDistance, t)
-        }
+        val d = metaballDistance(progress, snapProgress, h,
+            h + with(density) { 9.dp.toPx() }, maxBulbDistance)
 
         val x2 = x1 + d
 
@@ -681,6 +690,15 @@ class LiquidMetaballDockShape(
     }
 }
 
+/** Shared by the outline and placement, including the original spring overshoot. */
+internal fun metaballDistance(progress: Float, snapProgress: Float, touch: Float, snap: Float, max: Float): Float {
+    return if (progress < snapProgress) {
+        val t = (progress / snapProgress).coerceIn(0f, 1f)
+        if (t <= 0.42f) lerp(0f, touch, t / 0.42f)
+        else lerp(touch, snap, (t - 0.42f) / 0.58f)
+    } else lerp(snap, max, ((progress - snapProgress) / (1f - snapProgress)).coerceAtLeast(0f))
+}
+
 /**
  * A combined liquid dock container that hosts a 4-tab [LiquidNavigationTabs] and an integrated
  * action button (like "+") on the same row. When [actionVisible] is toggled, the companion
@@ -716,8 +734,6 @@ fun LiquidMetaballNavigationDock(
     val restingGapDp = 12.dp
     val snapProgress = 0.70f
     val maxBulbDistanceDp = bulbRadiusDp * 2f + restingGapDp
-    val dTouchDp = bulbRadiusDp * 2f
-    val dSnapDp = dTouchDp + 9.dp
 
     val progress by animateFloatAsState(
         targetValue = if (actionVisible) 1f else 0f,
@@ -728,6 +744,11 @@ fun LiquidMetaballNavigationDock(
         },
         label = "metaballActionProgress"
     )
+    val motionObserver = NavigationMotionDiagnostics.listener
+    LaunchedEffect(motionObserver, actionVisible) {
+        if (motionObserver != null) snapshotFlow { progress }
+            .collect { NavigationMotionDiagnostics.event("metaball", listOf(it, if (actionVisible) 1f else 0f)) }
+    }
 
     BoxWithConstraints(
         modifier = modifier,
@@ -741,22 +762,13 @@ fun LiquidMetaballNavigationDock(
         val dockHeightPx = with(density) { dockHeightDp.toPx() }
         val bulbRadiusPx = with(density) { bulbRadiusDp.toPx() }
         val maxBulbDistancePx = with(density) { maxBulbDistanceDp.toPx() }
+        val containerWidthPx = (dockWidthPx + maxBulbDistancePx).coerceAtMost(constraints.maxWidth.toFloat())
 
-        val currentDDp = if (progress < snapProgress) {
-            val t = (progress / snapProgress).coerceIn(0f, 1f)
-            if (t <= 0.42f) {
-                val subT = t / 0.42f
-                (dTouchDp.value * subT).dp
-            } else {
-                val subT = (t - 0.42f) / 0.58f
-                (dTouchDp.value + (dSnapDp.value - dTouchDp.value) * subT).dp
-            }
-        } else {
-            val t = ((progress - snapProgress) / (1f - snapProgress)).coerceAtLeast(0f)
-            (dSnapDp.value + (maxBulbDistanceDp.value - dSnapDp.value) * t).dp
+        // Fixed measurement; animation is observed only by placement and drawing.
+        val currentDistance = {
+            metaballDistance(progress, snapProgress, dockHeightPx,
+                dockHeightPx + with(density) { 9.dp.toPx() }, maxBulbDistancePx)
         }
-
-        val totalWidthDp = dockWidthDp + currentDDp
 
         val interactionSource = remember { MutableInteractionSource() }
         val isPressed by interactionSource.collectIsPressedAsState()
@@ -766,15 +778,7 @@ fun LiquidMetaballNavigationDock(
             label = "plusPress"
         )
 
-        val metaballShape = remember(
-            progress,
-            dockWidthPx,
-            dockHeightPx,
-            maxBulbDistancePx,
-            bulbRadiusPx,
-            pressScale,
-            density
-        ) {
+        val metaballShape = {
             LiquidMetaballDockShape(
                 progress = progress,
                 dockWidth = dockWidthPx,
@@ -786,14 +790,11 @@ fun LiquidMetaballNavigationDock(
             )
         }
 
-        val dockContainerColor = if (colors.isDark) {
-            Color(0xFF121212).copy(alpha = 0.40f)
-        } else {
-            Color(0xFFFAFAFA).copy(alpha = 0.40f)
-        }
+        val dockContainerColor = chromeGlassTint(backdrop != null && capability != GlassCapability.STATIC)
 
-        val isDetached = progress >= snapProgress
-        val isHidden = progress <= 0.02f
+        val isDetached by remember { derivedStateOf { progress >= snapProgress } }
+        val isHidden by remember { derivedStateOf { progress <= 0.02f } }
+        val showAction by remember { derivedStateOf { progress > 0.05f } }
         val isBridging = !isDetached && !isHidden
 
         val glassEnabled = backdrop != null && capability != GlassCapability.STATIC
@@ -802,7 +803,7 @@ fun LiquidMetaballNavigationDock(
             if (glassEnabled) {
                 Modifier.drawBackdrop(
                     backdrop = backdrop,
-                    shape = { metaballShape },
+                    shape = metaballShape,
                     effects = {
                         vibrancy()
                         blur(8.dp.toPx())
@@ -811,7 +812,10 @@ fun LiquidMetaballNavigationDock(
                     onDrawSurface = { drawRect(dockContainerColor) }
                 )
             } else {
-                Modifier.background(dockContainerColor, metaballShape)
+                Modifier.drawWithCache {
+                    val outline = metaballShape().createOutline(size, layoutDirection, this)
+                    onDrawBehind { drawOutline(outline, dockContainerColor) }
+                }
             }
         } else {
             Modifier
@@ -819,8 +823,13 @@ fun LiquidMetaballNavigationDock(
 
         Box(
             modifier = Modifier
-                .width(totalWidthDp)
+                .width(dockWidthDp + maxExtraWidthDp)
                 .height(dockHeightDp)
+                .graphicsLayer {
+                    val visibleWidth = (dockWidthPx + currentDistance()).coerceAtMost(constraints.maxWidth.toFloat())
+                    translationX = (containerWidthPx - visibleWidth) / 2f
+                },
+            contentAlignment = AbsoluteAlignment.TopLeft
         ) {
             // 0. Bridging metaball surface (isolated so its drawBackdrop layer clip does not clip tabs or the moving lens)
             if (isBridging) {
@@ -841,32 +850,25 @@ fun LiquidMetaballNavigationDock(
             }
 
             // 2. The Plus companion button
-            if (progress > 0.05f) {
-                val bulbCenterXDp = dockWidthDp - bulbRadiusDp + currentDDp
-                val bulbLeftXDp = bulbCenterXDp - bulbRadiusDp
-                val bulbTopYDp = (dockHeightDp - bulbSizeDp) / 2f
+            if (showAction) {
+                val bulbOffset = {
+                    IntOffset((dockWidthPx - 2f * bulbRadiusPx + currentDistance()).roundToInt(), 0)
+                }
 
                 if (isDetached) {
                     // Fully detached resting state: authentic liquid glass button with chromatic lens, highlight, and inner shadow
                     LiquidGlassIconButton(
                         onClick = onActionClick,
                         modifier = Modifier
-                            .offset {
-                                IntOffset(
-                                    x = with(density) { bulbLeftXDp.toPx().roundToInt() },
-                                    y = with(density) { bulbTopYDp.toPx().roundToInt() }
-                                )
-                            }
+                            .absoluteOffset { bulbOffset() }
                             .size(bulbSizeDp),
                         contentColor = colors.primary,
-                        containerColor = dockContainerColor,
                         contentDescription = actionContentDescription,
                         shape = CircleShape
                     ) {
-                        val iconAppearAlpha = ((progress - 0.25f) / 0.75f).coerceIn(0f, 1f)
                         Box(
                             modifier = Modifier.graphicsLayer {
-                                alpha = iconAppearAlpha
+                                alpha = ((progress - 0.25f) / 0.75f).coerceIn(0f, 1f)
                             },
                             contentAlignment = Alignment.Center,
                             content = actionIcon
@@ -876,12 +878,7 @@ fun LiquidMetaballNavigationDock(
                     // Bridging transition state: rendered on the unified metaball bridge
                     Box(
                         modifier = Modifier
-                            .offset {
-                                IntOffset(
-                                    x = with(density) { bulbLeftXDp.toPx().roundToInt() },
-                                    y = with(density) { bulbTopYDp.toPx().roundToInt() }
-                                )
-                            }
+                            .absoluteOffset { bulbOffset() }
                             .size(bulbSizeDp)
                             .semantics {
                                 role = Role.Button
@@ -896,9 +893,9 @@ fun LiquidMetaballNavigationDock(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        val iconAppearAlpha = ((progress - 0.25f) / 0.75f).coerceIn(0f, 1f)
                         Box(
                             modifier = Modifier.graphicsLayer {
+                                val iconAppearAlpha = ((progress - 0.25f) / 0.75f).coerceIn(0f, 1f)
                                 alpha = iconAppearAlpha
                                 scaleX = lerp(0.6f, 1f, iconAppearAlpha) * pressScale
                                 scaleY = lerp(0.6f, 1f, iconAppearAlpha) * pressScale

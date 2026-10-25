@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.coursetable.app.CourseApp
 import com.coursetable.app.data.AppSettings
@@ -23,7 +24,7 @@ import kotlinx.coroutines.launch
 
 enum class WeekFilter { ALL, ODD, EVEN }
 
-class TimetableViewModel(app: CourseApp) : ViewModel() {
+class TimetableViewModel(app: CourseApp, private val savedState: SavedStateHandle = SavedStateHandle()) : ViewModel() {
 
     private val courseRepo: CourseRepository = app.courseRepository
     private val settingsRepo: SettingsRepository = app.settingsRepository
@@ -55,10 +56,10 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     var detailCourse by mutableStateOf<Course?>(null)
         private set
 
-    var editingCourse by mutableStateOf<Course?>(null)
+    var editingCourse by mutableStateOf(savedState.get<ArrayList<Any>>("editingCourse")?.let(CourseDraftState::restore))
         private set
 
-    var editorOpen by mutableStateOf(false)
+    var editorOpen by mutableStateOf(editingCourse != null)
         private set
 
     init {
@@ -114,11 +115,13 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
             weekType = 0,
             color = nextColor
         )
+        savedState["editingCourse"] = CourseDraftState.save(editingCourse!!)
         editorOpen = true
     }
 
     fun openCourseEditor(course: Course) {
         editingCourse = course
+        savedState["editingCourse"] = CourseDraftState.save(course)
         editorOpen = true
         detailCourse = null
     }
@@ -126,6 +129,7 @@ class TimetableViewModel(app: CourseApp) : ViewModel() {
     fun closeEditor() {
         editorOpen = false
         editingCourse = null
+        savedState["editingCourse"] = null
     }
 
     fun showDetail(course: Course) {

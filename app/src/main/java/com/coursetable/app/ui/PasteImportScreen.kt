@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -57,7 +56,7 @@ internal fun PasteImportScreen(settings: AppSettings, onParsed: (PdfParseResult)
     val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
     LiquidScrollablePage(topBar = { LiquidPageTopBar("粘贴导入", onBack) }) { pageInsets ->
         EndInputOnOutsideTap { outsideTap ->
-            Column(Modifier.fillMaxSize().then(outsideTap).imePadding().verticalScroll(rememberScrollState()).padding(pageInsets.pagePadding()),
+            Column(Modifier.fillMaxSize().then(outsideTap).imePadding().verticalScroll(rememberPageScrollState()).padding(pageInsets.pagePadding()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("粘贴教务表格、AI 生成的课程 JSON 或同学分享的课表，解析后统一校对。",
                     style = MaterialTheme.typography.bodyMedium)

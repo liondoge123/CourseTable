@@ -46,7 +46,9 @@ data class AppSettings(
     val themeColor: String = "blue",
     val reminderEnabled: Boolean = false,
     val reminderMinutes: Int = 15,
-    val activePeriodSchemeId: String? = null
+    val activePeriodSchemeId: String? = null,
+    val wallpaper: WallpaperConfig? = null,
+    val glassEffect: String = GlassEffect.STANDARD.key
 ) {
     companion object {
         fun defaultPeriods(): List<PeriodTime> = listOf(
@@ -84,6 +86,8 @@ class SettingsRepository(
         val SHOW_NON_CURRENT_WEEK = intPreferencesKey("show_non_current_week")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_COLOR = stringPreferencesKey("theme_color")
+        val GLASS_EFFECT = stringPreferencesKey("glass_effect")
+        val WALLPAPER = stringPreferencesKey("timetable_wallpaper")
         val REMINDER_ENABLED = intPreferencesKey("reminder_enabled")
         val REMINDER_MINUTES = intPreferencesKey("reminder_minutes")
         val PERIOD_TIME_SCHEMES = stringPreferencesKey("period_time_schemes_json")
@@ -91,6 +95,16 @@ class SettingsRepository(
 
     /** 当前激活课表 id */
     val activeTimetableId: Flow<Long> = preferences.data.map { it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L }
+
+    val wallpaper: Flow<WallpaperConfig?> = preferences.data
+        .map { WallpaperConfig.decode(it[Keys.WALLPAPER]) }.distinctUntilChanged()
+
+    suspend fun saveWallpaper(config: WallpaperConfig) {
+        val encoded = config.encode()
+        preferences.edit { it[Keys.WALLPAPER] = encoded }
+    }
+
+    suspend fun clearWallpaper() { preferences.edit { it.remove(Keys.WALLPAPER) } }
 
     val periodTimeSchemes: Flow<List<PeriodTimeScheme>> = preferences.data
         .map { (it[Keys.ACTIVE_TIMETABLE_ID] ?: 0L) to (it[Keys.PERIOD_TIME_SCHEMES] ?: "") }
@@ -221,9 +235,11 @@ class SettingsRepository(
             showNonCurrentWeek = (prefs[Keys.SHOW_NON_CURRENT_WEEK] ?: 1) == 1,
             themeMode = prefs[Keys.THEME_MODE] ?: AppSettings().themeMode,
             themeColor = prefs[Keys.THEME_COLOR] ?: AppSettings().themeColor,
+            glassEffect = GlassEffect.fromKey(prefs[Keys.GLASS_EFFECT]).key,
             reminderEnabled = (prefs[Keys.REMINDER_ENABLED] ?: 0) == 1,
             reminderMinutes = (prefs[Keys.REMINDER_MINUTES] ?: 15).coerceIn(5, 60),
-            activePeriodSchemeId = t.periodSchemeId ?: prefs[activeSchemeKey]
+            activePeriodSchemeId = t.periodSchemeId ?: prefs[activeSchemeKey],
+            wallpaper = WallpaperConfig.decode(prefs[Keys.WALLPAPER])
         )
     }
 
@@ -241,7 +257,8 @@ class SettingsRepository(
         themeColor: String? = null,
         reminderEnabled: Boolean? = null,
         reminderMinutes: Int? = null,
-        activeTimetableId: Long? = null
+        activeTimetableId: Long? = null,
+        glassEffect: String? = null
     ) {
         // DataStore 部分
         preferences.edit { prefs ->
@@ -249,6 +266,7 @@ class SettingsRepository(
             if (showNonCurrentWeek != null) prefs[Keys.SHOW_NON_CURRENT_WEEK] = if (showNonCurrentWeek) 1 else 0
             if (themeMode != null) prefs[Keys.THEME_MODE] = themeMode
             if (themeColor != null) prefs[Keys.THEME_COLOR] = themeColor
+            if (glassEffect != null) prefs[Keys.GLASS_EFFECT] = GlassEffect.fromKey(glassEffect).key
             if (reminderEnabled != null) prefs[Keys.REMINDER_ENABLED] = if (reminderEnabled) 1 else 0
             if (reminderMinutes != null) prefs[Keys.REMINDER_MINUTES] = reminderMinutes.coerceIn(5, 60)
             if (activeTimetableId != null) prefs[Keys.ACTIVE_TIMETABLE_ID] = activeTimetableId
@@ -278,6 +296,7 @@ class SettingsRepository(
         showNonCurrentWeek = settings.showNonCurrentWeek,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
+        glassEffect = settings.glassEffect,
         reminderEnabled = settings.reminderEnabled,
         reminderMinutes = settings.reminderMinutes
     )

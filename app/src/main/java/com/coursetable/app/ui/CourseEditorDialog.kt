@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
@@ -102,9 +103,11 @@ fun CourseEditorDialog(
     var saving by remember { mutableStateOf(false) }
     val app = LocalContext.current.applicationContext as CourseApp
     val scope = rememberCoroutineScope()
-    var sessionDrafts by remember(course.id) { mutableStateOf(listOf(course.copy()) + course.additionalSessions.orEmpty()) }
-    var slot by remember(course.id) { mutableIntStateOf(0) }
-    var loaded by remember(course.id) { mutableStateOf(course.courseId == 0L || !showColorPicker) }
+    var sessionDrafts by rememberSaveable(course.id, stateSaver = CourseSessionDraftsSaver) {
+        mutableStateOf(listOf(course.copy()) + course.additionalSessions.orEmpty())
+    }
+    var slot by rememberSaveable(course.id) { mutableIntStateOf(0) }
+    var loaded by rememberSaveable(course.id) { mutableStateOf(course.courseId == 0L || !showColorPicker) }
     var removeSlot by remember { mutableStateOf(false) }
     var deleteCourseConfirm by remember { mutableStateOf(false) }
     var pendingSave by remember { mutableStateOf<Course?>(null) }
@@ -119,7 +122,7 @@ fun CourseEditorDialog(
         }
     }
     LaunchedEffect(course.courseId) {
-        if (showColorPicker && course.courseId > 0) {
+        if (!loaded && showColorPicker && course.courseId > 0) {
             sessionDrafts = app.courseRepository.byTimetableOnce(course.timetableId).filter { it.courseId == course.courseId }.sortedBy { it.id }
             slot = sessionDrafts.indexOfFirst { it.id == course.id }.coerceAtLeast(0)
             loaded = true
@@ -441,7 +444,8 @@ fun CourseEditorDialog(
     if (embedded) editorContent() else {
         ModalBottomSheet(
             onDismissRequest = { requestDismiss() },
-            canDismiss = { if (protectEdits && changed) { requestDismiss(); false } else !saving },
+            canDismiss = { !saving && !(protectEdits && changed) },
+            onDismissRejected = { requestDismiss() },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             preferReadability = true,
             shape = RoundedCornerShape(32.dp)

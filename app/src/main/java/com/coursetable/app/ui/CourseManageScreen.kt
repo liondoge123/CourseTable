@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -27,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -68,8 +68,8 @@ fun CourseManageScreen(
     rootMode: Boolean = false,
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
-    var editingCourse by remember { mutableStateOf<Course?>(null) }
-    val listState = rememberLazyListState()
+    var editingCourse by rememberSaveable(stateSaver = CourseDraftSaver) { mutableStateOf<Course?>(null) }
+    val listState = rememberContextLazyListState(LocalTimetableScrollKey.current)
     val app = LocalContext.current.applicationContext as CourseApp
     val scope = rememberCoroutineScope()
     val groupedCourses = remember(courses) { groupedManagedCourses(courses) }

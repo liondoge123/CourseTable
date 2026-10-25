@@ -154,6 +154,8 @@ object BackupManager {
     ): List<Course> {
         val courses = mutableListOf<Course>()
         if (arr == null) return courses
+        val courseIds = mutableMapOf<String, Long>()
+        var nextCourseId = 1L
         if (arr.length() > limit) warnings.add("课程数量超过上限，仅保留前 $limit 门")
         for (i in 0 until minOf(arr.length(), limit)) {
             val o = arr.optJSONObject(i) ?: continue
@@ -176,8 +178,8 @@ object BackupManager {
                     color = o.optLong("color", 0xFF0A84FF),
                     selectedWeeksCsv = o.optString("selectedWeeksCsv").take(240),
                     courseId = o.optString("courseKey").takeIf { it.isNotBlank() }?.let { key ->
-                        (0..i).mapNotNull { arr.optJSONObject(it)?.optString("courseKey") }.distinct().indexOf(key).toLong() + 1
-                    } ?: (i + 1L)
+                        courseIds.getOrPut(key) { nextCourseId++ }
+                    } ?: nextCourseId++
                 )
             )
         }

@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -162,6 +163,52 @@ class SettingsChoiceItemTest {
             capture("settings-align-row-${theme.key}")
         }
     }
+
+    private fun assertChoiceAppliesWhileTheMenuIsClosing(theme: Boolean) {
+        val id = if (theme) "theme-mode" else "card-align"
+        val initial = if (theme) "light" else "center"
+        val next = if (theme) "dark" else "left"
+        var selected by mutableStateOf(initial)
+        var changes = 0
+        compose.setContent {
+            CourseTableTheme(themeMode = if (theme) ThemeMode.fromKey(selected) else ThemeMode.LIGHT) {
+                // Keep callback timing independent of the graphics backend.
+                CompositionLocalProvider(LocalGlassCapability provides GlassCapability.STATIC) {
+                    LiquidBackdropHost(Modifier.fillMaxSize()) {
+                        Column(Modifier.padding(top = 96.dp)) {
+                            SettingsChoiceItem(id, Icons.Filled.Settings, if (theme) "主题模式" else "课程卡片文字对齐", selected,
+                                if (theme) listOf(SettingsChoice("light", "浅色"), SettingsChoice("dark", "深色"))
+                                else listOf(SettingsChoice("center", "居中"), SettingsChoice("left", "靠左")),
+                                onSelect = { selected = it; changes++ })
+                            Text("当前：$selected", Modifier.testTag("applied-choice"))
+                        }
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("settings-choice-$id").performClick()
+        compose.onNodeWithTag("$id-$next").assertIsDisplayed()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("$id-$next").performClick()
+        compose.runOnIdle {
+            assertEquals("Selection must be committed in the click callback, before any closing frame", next, selected)
+            assertEquals(1, changes)
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithTag("anchored-menu-surface", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("applied-choice", useUnmergedTree = true).assertTextEquals("当前：$next")
+        compose.onNodeWithTag("$id-$next").assertIsSelected()
+        // Exiting menu content must not commit another selection on a repeated tap.
+        compose.onNodeWithTag("$id-$initial").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.runOnIdle { assertEquals(next, selected); assertEquals(1, changes) }
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithTag("anchored-menu-surface", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, changes) }
+    }
+
+    @Test fun alignmentAppliesBeforeTheMenuFinishesShrinking() = assertChoiceAppliesWhileTheMenuIsClosing(false)
+
+    @Test fun themeAppliesBeforeTheMenuFinishesShrinking() = assertChoiceAppliesWhileTheMenuIsClosing(true)
 
     @Test fun alignmentSettingAppliesOnlyTheChosenValueAndOutsideTapKeepsIt() {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as CourseApp

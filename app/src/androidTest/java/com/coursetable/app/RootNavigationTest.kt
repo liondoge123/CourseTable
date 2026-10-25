@@ -119,6 +119,17 @@ class RootNavigationTest {
         composeRule.onAllNodesWithText("课表", useUnmergedTree = true)[0].assertIsDisplayed()
     }
 
+    @Test fun recreatingDuringADirectClickKeepsTheVisibleDestination() {
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onAllNodesWithText("设置")[0].performClick()
+        composeRule.mainClock.advanceTimeBy(96)
+        composeRule.activityRule.scenario.recreate()
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        composeRule.onAllNodes(hasText("设置") and isSelected())[0].assertIsDisplayed()
+        composeRule.onNodeWithText("学期与课表").assertIsDisplayed()
+    }
+
     @Test fun swipingRootPagesUpdatesTheDockAndKeepsSettingsSubpagesIsolated() {
         composeRule.onAllNodesWithText("导入")[0].performClick()
         composeRule.onNodeWithTag("root-pager").performTouchInput { swipeLeft() }

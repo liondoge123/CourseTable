@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -275,11 +276,21 @@ fun AboutScreen(
     LiquidScrollablePage(Modifier.testTag("about-page"), topBar = {
         LiquidPageTopBar("关于 CourseTable", onBack)
     }) { pageInsets ->
+            val direction = LocalLayoutDirection.current
+            val contentPadding = pageInsets.pagePadding(extraBottom = bottomContentPadding)
             Column(
                 Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(pageInsets.pagePadding(extraBottom = bottomContentPadding)),
+                    // Reserve the fixed header outside the scroll viewport.
+                    .padding(top = pageInsets.calculateTopPadding())
+                    .testTag("about-scroll")
+                    .verticalScroll(rememberPageScrollState())
+                    .padding(
+                        start = contentPadding.calculateStartPadding(direction),
+                        top = 16.dp,
+                        end = contentPadding.calculateEndPadding(direction),
+                        bottom = contentPadding.calculateBottomPadding()
+                    ),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Header: Logo + App Name + Version + Slogan
