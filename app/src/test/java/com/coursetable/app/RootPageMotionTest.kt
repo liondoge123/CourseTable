@@ -2,10 +2,72 @@ package com.coursetable.app
 
 import androidx.compose.animation.core.getVelocityFromNanos
 import com.coursetable.app.ui.RootPageMotion
+import com.coursetable.app.ui.RootPageTransition
+import com.coursetable.app.ui.RootDestination
 import org.junit.Assert.*
 import org.junit.Test
 
 class RootPageMotionTest {
+    @Test fun successiveTargetsAndReversalsKeepTheInheritedSpeedBounded() {
+        for (cadence in listOf(32_000_000L, 80_000_000L, 160_000_000L)) {
+            val strip = RootPageTransition(RootDestination.TIMETABLE)
+            var velocity = 0f
+            for (index in listOf(1, 2, 3, 2, 0, 3, 0)) {
+                val destination = RootDestination.entries[index]
+                val target = strip.target(destination)
+                val motion = RootPageMotion.animation(strip.position, target, velocity,
+                    strip.pages.minOf { it.anchor }, strip.pages.maxOf { it.anchor })
+                var time = 0L
+                while (time <= minOf(cadence, motion.durationNanos)) {
+                    assertTrue("cadence=$cadence target=$destination time=$time",
+                        kotlin.math.abs(motion.getVelocityFromNanos(time)) < 10f)
+                    time += 1_000_000L
+                }
+                if (motion.durationNanos <= cadence) {
+                    strip.snapTo(destination)
+                    velocity = 0f
+                } else {
+                    strip.moveTo(motion.getValueFromNanos(cadence))
+                    velocity = motion.getVelocityFromNanos(cadence)
+                }
+            }
+        }
+    }
+
+    @Test fun longerRetargetsDoNotMultiplyTheScreenSpaceSpeed() {
+        for (distance in listOf(1f, 2f, 3f)) {
+            val motion = RootPageMotion.animation(0f, distance, 0f, 0f, distance)
+            var peak = 0f
+            var time = 0L
+            while (time <= motion.durationNanos) {
+                peak = maxOf(peak, motion.getVelocityFromNanos(time))
+                time += 1_000_000L
+            }
+            assertTrue("distance=$distance peak=$peak", peak in 7f..7.5f)
+        }
+    }
+
+    @Test fun reversingARepeatedClickKeepsVelocityAndBrakesInsideThePageStrip() {
+        val outbound = RootPageMotion.animation(0f, 1f, 0f)
+        val position = outbound.getValueFromNanos(80_000_000L)
+        val velocity = outbound.getVelocityFromNanos(80_000_000L)
+        val returning = RootPageMotion.animation(position, 0f, velocity)
+        assertEquals(position, returning.getValueFromNanos(0), 0f)
+        assertEquals(velocity, returning.getVelocityFromNanos(0), 0.001f)
+        assertTrue(returning.getValueFromNanos(8_000_000L) > position)
+        var time = 0L
+        while (time <= returning.durationNanos) {
+            assertTrue(returning.getValueFromNanos(time) in 0f..1f)
+            time += 1_000_000L
+        }
+    }
+
+    @Test fun pageTailFinishesOnceTheResidualMovementIsVisuallySmall() {
+        val motion = RootPageMotion.animation(0f, 1f, 0f)
+        assertTrue(motion.durationNanos < 450_000_000L)
+        assertTrue(motion.getValueFromNanos(260_000_000L) > 0.96f)
+    }
+
     @Test fun aPageDoesNotRushToTheEndInTheOld180Milliseconds() {
         val motion = RootPageMotion.animation(0f, 1f, 0f)
         assertTrue(motion.getValueFromNanos(180_000_000L) in 0.8f..0.92f)

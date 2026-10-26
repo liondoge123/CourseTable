@@ -1,21 +1,16 @@
 package com.coursetable.app.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -29,12 +24,14 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.coursetable.app.ui.liquid.LocalBackLayerActive
 import com.coursetable.app.ui.liquid.LocalGlassOverlayController
 import com.coursetable.app.ui.liquid.NavigationMotionDiagnostics
 
-/** Dock clicks and finger swipes share the b237 full-width slide, without fading. */
+/** Requested pages share one full-width translation, for clicks and finger swipes. */
 @Composable
 internal fun RootNavigationHost(
     navigation: RootNavigationState,
@@ -48,7 +45,6 @@ internal fun RootNavigationHost(
     var width by remember { mutableIntStateOf(1) }
     val swipeSign = if (LocalLayoutDirection.current == LayoutDirection.Rtl) 1f else -1f
     val flingThreshold = with(LocalDensity.current) { 400.dp.toPx() } / width
-    val transition = rememberTransition(navigation.transition, label = "RootTabTransition")
     val motionObserver = NavigationMotionDiagnostics.listener
     LaunchedEffect(motionObserver, navigation) {
         if (motionObserver != null) snapshotFlow {
@@ -66,25 +62,15 @@ internal fun RootNavigationHost(
             onDragStarted = { navigation.beginDrag() },
             onDragStopped = { navigation.endDrag(swipeSign * it / width, flingThreshold) }
         )) {
-        transition.AnimatedContent(
-            modifier = Modifier.fillMaxSize(),
-            contentKey = { it },
-            transitionSpec = {
-                val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                val physicalDirection = (direction * -swipeSign).toInt()
-                // Keep the full-width, linear finger mapping. The state supplies
-                // smooth spring motion for clicks and velocity-aware release.
-                slideInHorizontally(tween(260, easing = LinearEasing)) { it * physicalDirection }
-                    .togetherWith(slideOutHorizontally(tween(260, easing = LinearEasing)) {
-                        -it * physicalDirection
-                    }).using(null)
-            }
-        ) { destination ->
+        for (page in navigation.transition.pages) key(page.destination) {
+            val destination = page.destination
             val pageActive = parentActive && !navigation.isTransitioning &&
                 destination == navigation.settledDestination
             savedPages.SaveableStateProvider(destination) {
                 CompositionLocalProvider(LocalBackLayerActive provides pageActive) {
-                    Box(Modifier.fillMaxSize().then(
+                    Box(Modifier.fillMaxSize().absoluteOffset {
+                        IntOffset(((page.anchor - navigation.transition.position) * width * -swipeSign).roundToInt(), 0)
+                    }.then(
                         if (pageActive) Modifier else Modifier.clearAndSetSemantics {}
                     )) { content(destination) }
                 }

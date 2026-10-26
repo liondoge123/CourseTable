@@ -230,6 +230,67 @@ class RootNavigationPagerTest {
         selected(RootDestination.SETTINGS)
     }
 
+    @Test fun aThirdTabKeepsVisiblePagesInPlaceAndDoesNotMultiplyTheirSpeed() {
+        show(RootDestination.TIMETABLE)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { navigation.navigateTo(RootDestination.COURSES) }
+        compose.mainClock.advanceTimeBy(80)
+        var before = 0f
+        compose.runOnIdle {
+            before = navigation.transition.position
+            navigation.navigateTo(RootDestination.IMPORT)
+            assertEquals("Retarget must preserve the rendered position", before, navigation.transition.position, 0f)
+        }
+        var previous = before
+        repeat(4) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.runOnIdle {
+                val next = navigation.transition.position
+                assertTrue("Retarget must keep moving forward", next >= previous)
+                assertTrue("No combined-animation sprint: $previous -> $next", next - previous < 0.16f)
+                val source = bounds.getValue(RootDestination.TIMETABLE)
+                val first = bounds.getValue(RootDestination.COURSES)
+                val last = bounds.getValue(RootDestination.IMPORT)
+                assertEquals(source.right, first.left, 1.1f)
+                assertEquals(first.right, last.left, 1.1f)
+                previous = next
+            }
+            val pixels = compose.onNodeWithTag("root-pager").captureToImage().toPixelMap()
+            for (x in 8 until pixels.width - 8 step 24) {
+                assertTrue("The retarget must never expose the background",
+                    pixels[x, pixels.height / 2] in listOf(Color.Red, Color.Green, Color.Blue))
+            }
+        }
+        compose.mainClock.autoAdvance = true
+        selected(RootDestination.IMPORT)
+    }
+
+    @Test fun reversingAClickBrakesContinuouslyWithoutReplacingTheVisiblePages() {
+        show(RootDestination.COURSES)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { navigation.navigateTo(RootDestination.SETTINGS) }
+        compose.mainClock.advanceTimeBy(80)
+        var previous = 0f
+        compose.runOnIdle {
+            previous = navigation.transition.position
+            navigation.navigateTo(RootDestination.COURSES)
+            assertEquals(previous, navigation.transition.position, 0f)
+        }
+        val positions = mutableListOf(previous)
+        repeat(32) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.runOnIdle {
+                val next = navigation.transition.position
+                assertTrue("Reversal must remain continuous: $previous -> $next", abs(next - previous) < 0.16f)
+                positions += next
+                previous = next
+            }
+        }
+        assertTrue("Existing momentum must brake before reversing", positions.max() > positions.first())
+        compose.mainClock.autoAdvance = true
+        selected(RootDestination.COURSES)
+    }
+
     @Test fun clickingBackToAnOutgoingPageDoesNotDuplicateItsSavedStateProvider() {
         show(RootDestination.COURSES)
         compose.onNodeWithTag("value-COURSES").performClick()

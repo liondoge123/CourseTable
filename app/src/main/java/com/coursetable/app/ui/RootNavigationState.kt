@@ -1,6 +1,5 @@
 package com.coursetable.app.ui
 
-import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.getVelocityFromNanos
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
@@ -23,20 +22,19 @@ import kotlin.math.roundToInt
 import kotlin.math.sign
 import kotlin.coroutines.coroutineContext
 
-/** A single full-width transition for clicks and swipes; no temporary page ordering. */
+/** A single screen-space position drives full-width clicks and finger swipes. */
 @Stable
 internal class RootNavigationState(
     private val savedDestination: MutableState<RootDestination>,
     private val scope: CoroutineScope
 ) {
-    val transition = SeekableTransitionState(savedDestination.value)
+    val transition = RootPageTransition(savedDestination.value)
     private var clickTarget by mutableStateOf<RootDestination?>(null)
     private var motionJob: Job? = null
-    private var seekJob: Job? = null
     private var generation = 0
     private var dragSource = savedDestination.value
     private var dragOffset by mutableStateOf(0f)
-    private var fractionVelocity = 0f
+    private var pageVelocity = 0f
     var isDragging by mutableStateOf(false)
         private set
     var isSwiping by mutableStateOf(false)
@@ -62,24 +60,19 @@ internal class RootNavigationState(
         if (clickTarget == destination || (!isTransitioning && settledDestination == destination)) return
         NavigationMotionDiagnostics.event("page.request")
         val request = ++generation
-        val continuingSwipe = isSwiping
-        val initialVelocity = if (isSwiping && !isDragging) fractionVelocity else 0f
+        val initialVelocity = if (isDragging) 0f else pageVelocity
         clickTarget = destination
         savedDestination.value = destination
         isDragging = false
         motionJob?.cancel()
+        // Keep every already visible page in the same coordinates. Reversals
+        // reuse its existing tile; a new destination enters beside the strip.
+        // No independent outgoing/incoming animations can add their speeds.
+        transition.target(destination)
+        isSwiping = false
         motionJob = scope.launch {
             try {
-                seekJob?.join()
-                isSwiping = false
-                // Both inputs use the same coordinates, so a click can continue or
-                // retarget a partial swipe directly, without an intermediate stop.
-                if (continuingSwipe &&
-                    (destination == transition.currentState || destination == transition.targetState)) {
-                    settleSwipe(destination, initialVelocity)
-                } else {
-                    transition.animateTo(destination, RootPageMotion.spec)
-                }
+                settlePage(destination, initialVelocity)
             } finally {
                 if (request == generation) {
                     clickTarget = null
@@ -94,12 +87,10 @@ internal class RootNavigationState(
         ++generation
         motionJob?.cancel()
         dragSource = transition.currentState
-        dragOffset = if (isSwiping) {
-            (transition.targetState.ordinal - dragSource.ordinal) * transition.fraction
-        } else 0f
+        dragOffset = if (isSwiping) transition.position else 0f
         isDragging = true
         isSwiping = true
-        fractionVelocity = 0f
+        pageVelocity = 0f
     }
 
     /** Positive values move towards the next destination, independent of layout direction. */
@@ -109,18 +100,7 @@ internal class RootNavigationState(
             if (dragSource.ordinal > 0) -1f else 0f,
             if (dragSource.ordinal < RootDestination.entries.lastIndex) 1f else 0f
         )
-        val offset = dragOffset
-        val source = dragSource
-        val target = RootDestination.entries[source.ordinal + offset.sign.toInt()]
-        seekJob?.cancel()
-        seekJob = scope.launch {
-            // A reversal through the source starts the other adjacent pair at zero.
-            // Keeping the original source also allows dragging back out of timetable.
-            if (transition.currentState != source || transition.targetState != target) {
-                transition.snapTo(source)
-            }
-            transition.seekTo(abs(offset), target)
-        }
+        transition.drag(dragSource, dragOffset)
     }
 
     fun endDrag(velocity: Float, velocityThreshold: Float) {
@@ -134,48 +114,58 @@ internal class RootNavigationState(
             if (advance) offset.sign.toInt() else 0).coerceIn(RootDestination.entries.indices)]
         savedDestination.value = target
         isDragging = false
-        val direction = offset.sign
         motionJob = scope.launch {
             try {
-                seekJob?.join()
-                settleSwipe(target, velocity * direction)
+                settlePage(target, velocity)
             } finally {
                 if (request == generation) isSwiping = false
             }
         }
     }
 
-    private suspend fun settleSwipe(destination: RootDestination, initialVelocity: Float) {
-        val source = transition.currentState
-        val target = transition.targetState
-        val start = transition.fraction
-        val end = if (destination == target) 1f else 0f
+    private suspend fun settlePage(destination: RootDestination, initialVelocity: Float) {
+        val start = transition.position
+        val end = transition.anchorOf(destination)
         val scale = coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f
-        if (source != target && abs(end - start) > 0.0001f && scale > 0f) {
+        if (abs(end - start) > 0.0001f && scale > 0f) {
             // The simulation runs in scaled animation time; its initial velocity
             // must still match the finger in real screen widths per second.
-            val animation = RootPageMotion.animation(start, end, initialVelocity * scale)
-            val started = withFrameNanos { it }
+            val minimum = transition.pages.minOf { it.anchor }
+            val maximum = transition.pages.maxOf { it.anchor }
+            val animation = RootPageMotion.animation(start, end, initialVelocity * scale, minimum, maximum)
+            var started = Long.MIN_VALUE
             do {
-                val playTime = ((withFrameNanos { it } - started) / scale.toDouble()).toLong()
-                fractionVelocity = animation.getVelocityFromNanos(playTime) / scale
-                transition.seekTo(animation.getValueFromNanos(playTime).coerceIn(0f, 1f), target)
-            } while (!animation.isFinishedFromNanos(playTime))
+                // Publish inside the frame callback, before placement. Resuming
+                // the coroutine first can publish after this frame's layout and
+                // leave the visible position a frame behind the spring clock.
+                val finished = withFrameNanos { frame ->
+                    if (started == Long.MIN_VALUE) started = frame
+                    val playTime = ((frame - started) / scale.toDouble()).toLong()
+                    pageVelocity = animation.getVelocityFromNanos(playTime) / scale
+                    // Preserve the exact handoff position, including Float rounding
+                    // at t=0. It must never introduce even a tiny backwards step.
+                    transition.moveTo(if (playTime == 0L) start else
+                        animation.getValueFromNanos(playTime).coerceIn(minimum, maximum))
+                    if (NavigationMotionDiagnostics.listener != null) {
+                        NavigationMotionDiagnostics.event("page.motion", listOf(transition.position, pageVelocity))
+                    }
+                    animation.isFinishedFromNanos(playTime)
+                }
+            } while (!finished)
         }
         // Keep the same source/target coordinates throughout snap-back. A new
         // finger can therefore resume at the exact visible offset in either direction.
         transition.snapTo(destination)
-        fractionVelocity = 0f
+        pageVelocity = 0f
     }
 
     suspend fun scrollTo(destination: RootDestination) {
         ++generation
         motionJob?.cancel()
-        seekJob?.cancel()
         clickTarget = null
         isDragging = false
         isSwiping = false
-        fractionVelocity = 0f
+        pageVelocity = 0f
         savedDestination.value = destination
         transition.snapTo(destination)
     }
