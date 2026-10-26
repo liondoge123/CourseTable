@@ -33,3 +33,11 @@
 环境为独立只读 Android 14 / API 34 模拟器，原生 1080×2400 / 420 dpi、60 Hz、2048 MB / 4 核、host OpenGL、Vulkan 关闭。测试期间不并行编译，网络关闭以避免后台 WebView 更新。未连接出现问题的物理手机，预览包仍需在该手机上复核观感。
 
 `RootNavigationFrameProfileTest` 另完成一轮实际主界面原生点击，包含课表→课程→导入→设置及返回的六个方向。六次均到达目标页，镜片目标回退和 FrameMetrics 回调丢失均为 0。该轮绘制帧间隔 P95 为 133.33–300.00 ms，仍存在明显长帧；没有对照构建，不能宣称渲染性能改善，也不能将动画轨迹的速度边界当作物理屏幕流畅性的证明。原始数据为 `frame-profile.log`，汇总为 `frame-profile-summary.json`。本轮完成的是动效行为和交接调整，物理手机观感及剩余绘制开销仍待复核。
+
+## 预览包与清理
+
+使用 `pwsh scripts/build-apk.ps1 preview` 生成 `CourseTable-v1.9.1-preview-b276-arm64-v8a-preview.apk`，根目录保留同名副本。包名 `com.coursetable.app`，版本 `1.9.1-preview` / versionCode 276，arm64-v8a，30,111,174 字节。标准脚本确认正式证书一致、APK v2 签名有效、包名/版本/SDK/ABI 正确；根目录副本的 SHA-256 另行复核，与 `app/build/outputs/apk/preview/SHA256SUMS.txt` 一致。
+
+SHA-256：`f1ca3747882e4a3c1918fab5a80f72e3ffc3956248bffdc067f6f7583ee67f18`。构建日志为 `app/build/logs/preview-b276.log`，脚本摘要为 `.artifacts/page-motion-20261026/preview-build-summary.log`。未发布正式版本或推送远端。
+
+本次只读模拟器已通过对应的 `emulator-5554` 退出，ADB 最后列表为空。设备侧未生成截图、录屏或 UI XML，没有遗留待清理的测试路径。源代码提交为 `de3606a`；原有壁纸等未提交修改保留，版本文件仅由标准预览脚本继续递增内部编号。
