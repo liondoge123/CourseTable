@@ -91,7 +91,11 @@ class TimetableConflictTest {
     @After fun restore() {
         compose.mainClock.autoAdvance = true
         if (::vm.isInitialized) compose.runOnIdle { visible.value = false }
-        InstrumentationRegistry.getInstrumentation().runOnMainSync { lifecycleOwner.lifecycle.currentState = Lifecycle.State.DESTROYED }
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) {
+                lifecycleOwner.lifecycle.currentState = Lifecycle.State.DESTROYED
+            }
+        }
         runBlocking {
             originalTable?.let { app.settingsRepository.setActiveTimetable(it) }
             createdTables.forEach { app.timetableRepository.delete(it) }
@@ -130,7 +134,7 @@ class TimetableConflictTest {
         show(count = 12, large = true)
         compose.onNodeWithText(sessions.last().name).assertDoesNotExist()
         open(12)
-        compose.onNodeWithTag("timetable-conflict-list").performScrollToIndex(11)
+        compose.onNodeWithTag("timetable-conflict-list", useUnmergedTree = true).performScrollToIndex(11)
         compose.onNodeWithTag("timetable-conflict-choice-${sessions.last().id}").assertIsDisplayed().performClick()
         compose.onNodeWithTag("timetable-conflict-picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(sessions.last().id, vm.detailCourse?.id) }
