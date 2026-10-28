@@ -36,14 +36,20 @@ class WallpaperNavigationTest {
                 compose.onNodeWithTag("timetable-wallpaper-background").assertIsDisplayed()
                 compose.onAllNodesWithText("设置")[0].performClick()
                 compose.onNodeWithTag("timetable-wallpaper-background").assertDoesNotExist()
+                compose.onNodeWithText("外观设置").performScrollTo().performClick()
                 compose.onNodeWithText("课表壁纸").performScrollTo().performClick()
+                compose.mainClock.advanceTimeBy(350)
                 compose.onNodeWithTag("wallpaper-editor").assertIsDisplayed()
                 captureWallpaperScreenshot("wallpaper-editor-full")
-                compose.onNodeWithTag("wallpaper-slider-遮罩").performScrollTo()
+                compose.onNodeWithTag("wallpaper-adjust").performClick()
+                compose.mainClock.advanceTimeBy(350)
+                compose.onNodeWithTag("wallpaper-slider-遮罩")
                     .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(.65f) }
                 compose.activityRule.scenario.recreate()
-                compose.onNodeWithTag("wallpaper-slider-遮罩").performScrollTo()
+                compose.onNodeWithTag("wallpaper-slider-遮罩")
                     .assertRangeInfoEquals(androidx.compose.ui.semantics.ProgressBarRangeInfo(.65f, 0f..0.8f))
+                compose.onNodeWithTag("wallpaper-adjustments-done").performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("wallpaper-adjustments").fetchSemanticsNodes().isEmpty() }
                 compose.runOnIdle {
                     compose.activity.onBackPressedDispatcher.dispatchOnBackStarted(BackEventCompat(0f, 300f, 0f, BackEventCompat.EDGE_LEFT))
                 }
@@ -55,6 +61,8 @@ class WallpaperNavigationTest {
                 assertEquals(wallpaper, app.settingsRepository.wallpaper.first())
                 compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
                 compose.onNodeWithTag("wallpaper-editor").assertDoesNotExist()
+                compose.onNodeWithTag("appearance-settings-page").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
                 compose.onAllNodesWithText("课表")[0].performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("timetable-wallpaper-background").fetchSemanticsNodes().isNotEmpty() }
                 compose.activityRule.scenario.recreate()

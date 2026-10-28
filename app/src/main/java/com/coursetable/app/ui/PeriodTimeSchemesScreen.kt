@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.PeriodTimeScheme
+import com.coursetable.app.ui.theme.tabularNumbers
 import com.coursetable.app.data.PeriodUtils
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
@@ -179,7 +180,7 @@ fun PeriodTimeSchemesScreen(
                             ListChoiceIndicator(true)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(ManagementListDefaults.TextGap)) {
                                 Text("当前自定义", style = MaterialTheme.typography.titleMedium)
-                                Text(periodTimeSummary(periods), style = MaterialTheme.typography.bodySmall,
+                                Text(periodTimeSummary(periods), style = MaterialTheme.typography.bodySmall.tabularNumbers(),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -231,7 +232,7 @@ fun PeriodTimeSchemesScreen(
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(ManagementListDefaults.TextGap)) {
                                 Text(scheme.name, style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface)
-                                Text(periodTimeSummary(scheme.periods), style = MaterialTheme.typography.bodySmall,
+                                Text(periodTimeSummary(scheme.periods), style = MaterialTheme.typography.bodySmall.tabularNumbers(),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -295,7 +296,7 @@ fun PeriodTimeSchemesScreen(
                         }, enabled = !busy && item.durationMinutes > 20) {
                             Icon(Icons.Filled.Remove, "减 5 分钟", modifier = Modifier.size(20.dp))
                         }
-                        Text("${item.durationMinutes} 分钟", style = MaterialTheme.typography.titleSmall)
+                        Text("${item.durationMinutes} 分钟", style = MaterialTheme.typography.titleSmall.tabularNumbers())
                         IconButton(onClick = {
                             val duration = (item.durationMinutes + 5).coerceIn(20, 90)
                             draft = item.copy(durationMinutes = duration)
@@ -314,11 +315,11 @@ fun PeriodTimeSchemesScreen(
                                 .heightIn(min = 56.dp).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("第 ${index + 1} 节课", style = MaterialTheme.typography.bodyMedium,
+                            Text("第 ${index + 1} 节课", style = MaterialTheme.typography.bodyMedium.tabularNumbers(),
                                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f))
                             Text("${period.start.format(PeriodTime.TIME_FMT)} - ${period.end.format(PeriodTime.TIME_FMT)}",
-                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium.tabularNumbers(), color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1, modifier = Modifier.padding(start = 8.dp))
                             if (item.periods.size > 1) {
                                 QuietDeleteButton(
@@ -389,7 +390,7 @@ fun PeriodTimeSchemesScreen(
         val problem = candidate.exceptionOrNull()?.message ?: candidate.getOrNull()?.let { PeriodUtils.validatePeriods(it) }
         AlertDialog(
             onDismissRequest = { previewUniformDuration = false },
-            title = { Text("统一为 ${item.durationMinutes} 分钟") },
+            title = { Text("统一为 ${item.durationMinutes} 分钟", style = MaterialTheme.typography.bodyMedium.tabularNumbers()) },
             text = {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     candidate.getOrNull()?.let { PeriodChangesPreview(item.periods, it) }

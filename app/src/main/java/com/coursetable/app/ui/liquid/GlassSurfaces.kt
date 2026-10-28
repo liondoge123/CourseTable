@@ -117,6 +117,7 @@ internal fun OverlayGlassSurface(
     style: OverlayGlassStyle = OverlayGlassStyle.DIALOG,
     refractionEnabled: Boolean = true,
     preferReadability: Boolean = false,
+    surfaceVisible: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val overlayBackdrop = LocalOverlayGlassBackdrop.current
@@ -149,7 +150,9 @@ internal fun OverlayGlassSurface(
     val fallbackTint = requestedTint.copy(alpha = if (isLightTheme) 0.86f else 0.88f)
 
     // Dense editors soften background detail without adding tint or borders.
-    val surfaceModifier = if (backdrop != null && capability != GlassCapability.STATIC) {
+    val surfaceModifier = if (!surfaceVisible) {
+        modifier
+    } else if (backdrop != null && capability != GlassCapability.STATIC) {
         modifier
             .drawBackdrop(
                 backdrop = backdrop,

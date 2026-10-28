@@ -117,6 +117,19 @@ class WallpaperRepository(
         }
     }
 
+    /** Ready pixels only: no file reads or filtering on the composition thread. */
+    fun cachedBitmap(config: WallpaperConfig, widthDp: Float, heightDp: Float): Bitmap? {
+        val original = cache.get(config.imageId) ?: return null
+        if (config.blurDp <= 0f) return original
+        return cache.get("${config.imageId}:${blurRadius(original, config, widthDp, heightDp)}")
+    }
+
+    private fun blurRadius(original: Bitmap, config: WallpaperConfig, widthDp: Float, heightDp: Float): Int {
+        val ratio = minOf(1f, 768f / max(original.width, original.height))
+        val renderScale = max(widthDp / original.width, heightDp / original.height) * config.scale
+        return (config.blurDp / renderScale.coerceAtLeast(.01f) * ratio).roundToInt().coerceIn(1, 64)
+    }
+
     /** All decode/filter work happens off the render thread; cached images are never recycled in use. */
     suspend fun bitmap(config: WallpaperConfig, widthDp: Float, heightDp: Float): Bitmap? = withContext(Dispatchers.Default) {
         imageMutex.withLock {
@@ -127,8 +140,7 @@ class WallpaperRepository(
             } ?: return@withContext null
             if (config.blurDp <= 0f) return@withContext original
             val ratio = minOf(1f, 768f / max(original.width, original.height))
-            val renderScale = max(widthDp / original.width, heightDp / original.height) * config.scale
-            val radius = (config.blurDp / renderScale.coerceAtLeast(.01f) * ratio).roundToInt().coerceIn(1, 64)
+            val radius = blurRadius(original, config, widthDp, heightDp)
             val key = "${config.imageId}:$radius"
             cache.get(key) ?: run {
                 val small = Bitmap.createScaledBitmap(original, max(1, (original.width * ratio).roundToInt()),

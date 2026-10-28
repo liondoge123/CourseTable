@@ -15,6 +15,7 @@ import com.coursetable.app.data.PeriodTime
 import com.coursetable.app.data.PeriodUtils
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.LiquidTheme
+import com.coursetable.app.ui.theme.tabularNumbers
 import java.time.LocalTime
 
 @Composable
@@ -42,7 +43,7 @@ internal fun PeriodTimeEditorDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("第 ${index + 1} 节课", Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-            style = LiquidTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
+            style = LiquidTheme.typography.titleLarge.tabularNumbers(), fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).testTag("period-time-editor"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -96,7 +97,7 @@ internal fun PeriodChangesPreview(before: List<PeriodTime>, after: List<PeriodTi
         Text("调整预览", style = LiquidTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
         changes.forEach { index ->
             Text("第 ${index + 1} 节  ${before[index].label()} → ${after[index].label()}",
-                style = LiquidTheme.typography.bodySmall)
+                style = LiquidTheme.typography.bodySmall.tabularNumbers())
         }
     }
 }

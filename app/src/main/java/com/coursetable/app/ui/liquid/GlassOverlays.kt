@@ -120,6 +120,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import com.coursetable.app.ui.theme.tabularNumbers
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.theme.LiquidTheme
 import com.kyant.shapes.Capsule
@@ -165,6 +166,8 @@ fun ModalBottomSheet(
     canDismiss: () -> Boolean = { true },
     preferReadability: Boolean = false,
     onDismissRejected: () -> Unit = {},
+    scrimColor: Color = Color.Unspecified,
+    previewingContent: Boolean = false,
     content: @Composable () -> Unit
 ) {
     var drag by remember { mutableFloatStateOf(0f) }
@@ -251,14 +254,15 @@ fun ModalBottomSheet(
             Box(Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     visibleState = scrimVisibility,
-                    modifier = Modifier.predictiveBackScrim(back),
+                    modifier = Modifier.predictiveBackScrim(back)
+                        .graphicsLayer { alpha = if (previewingContent) 0f else 1f },
                     enter = fadeIn(tween(220, easing = LinearOutSlowInEasing)),
                     exit = if (back.completed) ExitTransition.None else fadeOut(tween(180, easing = FastOutSlowInEasing))
                 ) {
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .background(libraryOverlayDimColor())
+                            .background(scrimColor.takeUnless { it == Color.Unspecified } ?: libraryOverlayDimColor())
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -293,7 +297,9 @@ fun ModalBottomSheet(
                         baseColor = containerColor.takeUnless { it == Color.Unspecified },
                         shadowElevation = 24.dp,
                         style = OverlayGlassStyle.SHEET,
-                        preferReadability = preferReadability
+                        preferReadability = preferReadability,
+                        // Keep the content and its active pointer input in the same layout.
+                        surfaceVisible = !previewingContent
                     ) {
                         // Keep the sheet frame anchored when the IME opens. Full-height
                         // editors handle keyboard avoidance inside their own fixed bounds.
@@ -306,6 +312,7 @@ fun ModalBottomSheet(
                                 Modifier
                                     .fillMaxWidth()
                                     .height(26.dp)
+                                    .graphicsLayer { alpha = if (previewingContent) 0f else 1f }
                                     .pointerInput(Unit) {
                                         detectVerticalDragGestures(
                                             onVerticalDrag = { _, amount -> drag = (drag + amount).coerceAtLeast(0f) },
@@ -898,8 +905,8 @@ fun WheelColumn(
                         else LiquidTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
                         fontWeight = if (value == selected) FontWeight.Bold else FontWeight.Normal,
                         textAlign = TextAlign.Center,
-                        style = if (value == selected) LiquidTheme.typography.headlineSmall
-                        else LiquidTheme.typography.bodyLarge
+                        style = (if (value == selected) LiquidTheme.typography.headlineSmall
+                        else LiquidTheme.typography.bodyLarge).tabularNumbers()
                     )
                 }
             }

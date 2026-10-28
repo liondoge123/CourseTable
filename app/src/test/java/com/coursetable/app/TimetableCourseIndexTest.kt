@@ -27,7 +27,90 @@ class TimetableCourseIndexTest {
                 WeekFilter.EVEN -> course.scheduledWeeks().any { it % 2 == 0 }
             }
             matches && course.lastWeek() >= week && (show || course.visibleOnWeek(week))
+        }.let { candidates ->
+            val accepted = candidates.filter { it.visibleOnWeek(week) }.toMutableList()
+            candidates.filterNot { it.visibleOnWeek(week) }
+                .sortedWith(compareBy<Course> { course ->
+                    course.scheduledWeeks().firstOrNull { it >= week } ?: Int.MAX_VALUE
+                }.thenBy { it.id })
+                .forEach { course ->
+                    if (accepted.none { other ->
+                        course.dayOfWeek == other.dayOfWeek &&
+                            course.startSection < other.startSection + other.duration &&
+                            other.startSection < course.startSection + course.duration
+                    }) accepted += course
+                }
+            candidates.filter { it in accepted }
         }
+
+    private fun course(id: Long, start: Int = 3, duration: Int = 2, day: Int = 1,
+        startWeek: Int = 1, endWeek: Int = 18, weekType: Int = 0, weeks: String = "") = Course(
+        id = id, name = "课程$id", dayOfWeek = day, startSection = start, duration = duration,
+        startWeek = startWeek, endWeek = endWeek, weekType = weekType, selectedWeeksCsv = weeks
+    )
+
+    @Test fun scheduledCourseWinsEveryOverlapShapeRegardlessOfInputOrder() {
+        val current = course(10, endWeek = 7)
+        // Exact match, enclosing, enclosed, overlaps the start, overlaps the end.
+        for ((start, duration) in listOf(3 to 2, 2 to 4, 3 to 1, 2 to 2, 4 to 2)) {
+            val inactive = course(20, start, duration, startWeek = 8)
+            for (input in listOf(listOf(current, inactive), listOf(inactive, current))) {
+                val result = TimetableCourseIndex(input).forWeek(1, true, WeekFilter.ALL)
+                assertEquals("start=$start duration=$duration input=$input", listOf(current), result.map { it.course })
+                assertTrue(result.single().scheduledThisWeek)
+                assertEquals(listOf(inactive), TimetableCourseIndex(input).forWeek(8, true, WeekFilter.ALL)
+                    .map { it.course })
+            }
+        }
+    }
+
+    @Test fun adjacentSectionsAndOtherDaysStillShowTheirFullDimmedCards() {
+        val current = course(1)
+        val before = course(2, start = 1, startWeek = 8)
+        val after = course(3, start = 5, startWeek = 8)
+        val otherDay = course(4, day = 2, startWeek = 8)
+        val input = listOf(after, current, otherDay, before)
+        val result = TimetableCourseIndex(input).forWeek(1, true, WeekFilter.ALL)
+        assertEquals(input, result.map { it.course })
+        assertEquals(listOf(false, true, false, false), result.map { it.scheduledThisWeek })
+    }
+
+    @Test fun inactiveOverlapUsesNextActualWeekAndRecomputesWhenTheWeekChanges() {
+        val sparse = course(1, weeks = "1,12")
+        val even = course(2, weekType = 2)
+        val odd = course(3, startWeek = 7, weekType = 1)
+        val index = TimetableCourseIndex(listOf(sparse, odd, even))
+        val fifth = index.forWeek(5, true, WeekFilter.ALL)
+        assertEquals(listOf(even), fifth.map { it.course })
+        assertFalse(fifth.single().scheduledThisWeek)
+        assertEquals(listOf(even), index.forWeek(6, true, WeekFilter.ALL).map { it.course })
+        val seventh = index.forWeek(7, true, WeekFilter.ALL)
+        assertEquals(listOf(odd), seventh.map { it.course })
+        assertTrue(seventh.single().scheduledThisWeek)
+        assertEquals(listOf(odd), index.forWeek(5, true, WeekFilter.ODD).map { it.course })
+        assertEquals(listOf(even), index.forWeek(5, true, WeekFilter.EVEN).map { it.course })
+        assertTrue(index.forWeek(5, false, WeekFilter.ALL).isEmpty())
+    }
+
+    @Test fun equalNextWeeksUseStableIdsAndSuppressedCardsDoNotReserveSpace() {
+        val first = course(1, start = 1, startWeek = 8)
+        val bridge = course(2, start = 2, startWeek = 8)
+        val last = course(3, start = 3, startWeek = 8)
+        for (input in listOf(listOf(first, bridge, last), listOf(last, bridge, first))) {
+            val result = TimetableCourseIndex(input).forWeek(1, true, WeekFilter.ALL)
+            assertEquals(input.filter { it != bridge }, result.map { it.course })
+            assertTrue(result.none { it.scheduledThisWeek })
+        }
+    }
+
+    @Test fun realCurrentWeekConflictsAreNotSilentlyHidden() {
+        val current = course(1)
+        val conflictingCurrent = course(2, start = 4)
+        val inactive = course(3, startWeek = 8)
+        val input = listOf(inactive, conflictingCurrent, current)
+        assertEquals(listOf(conflictingCurrent, current),
+            TimetableCourseIndex(input).forWeek(1, true, WeekFilter.ALL).map { it.course })
+    }
 
     @Test fun indexedWeeksPreserveFilteringOrderAndDimming() {
         val index = TimetableCourseIndex(courses)

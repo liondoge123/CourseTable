@@ -24,6 +24,9 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
+import android.net.Uri
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 /** Diagnostic only: actual MainActivity, native input, real render clock, no FPS assertions. */
 class RootNavigationFrameProfileTest {
@@ -48,10 +51,47 @@ class RootNavigationFrameProfileTest {
     private data class Input(val down: Long, val up: Long)
 
     @Test fun compareDockClicksAndSwipesOnTheSameAdjacentPages() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val wallpaperMode = arguments.getString("frameProfileWallpaper")
+        if (wallpaperMode == null) {
+            profile()
+            return
+        }
+        assumeTrue("Opt in with -e profileNavigationFrames true", arguments.getString("profileNavigationFrames") == "true")
+        require(wallpaperMode in listOf("none", "pattern"))
+        val app = instrumentation.targetContext.applicationContext as CourseApp
+        val original = runBlocking { app.settingsRepository.wallpaper.first() }
+        WallpaperTestEnvironment().use { environment ->
+            var prepared: com.coursetable.app.data.WallpaperConfig? = null
+            try {
+                runBlocking {
+                    if (wallpaperMode == "pattern") {
+                        prepared = app.wallpaperRepository.prepare(Uri.fromFile(environment.patternedSource()))
+                        app.settingsRepository.saveWallpaper(checkNotNull(prepared))
+                    } else app.settingsRepository.clearWallpaper()
+                }
+                activity.scenario.recreate()
+                profile()
+            } finally {
+                runBlocking {
+                    if (original == null) app.settingsRepository.clearWallpaper()
+                    else app.settingsRepository.saveWallpaper(original)
+                    prepared?.let { app.wallpaperRepository.discard(it.imageId) }
+                }
+            }
+        }
+    }
+
+    private fun profile() {
         assumeTrue("Requires Android 12 frame deadline metrics", Build.VERSION.SDK_INT >= 31)
         assumeTrue("Opt in with -e profileNavigationFrames true",
             InstrumentationRegistry.getArguments().getString("profileNavigationFrames") == "true")
         val dockOnly = InstrumentationRegistry.getArguments().getString("frameProfileMode") == "dock_only"
+        val includeTimetable = InstrumentationRegistry.getArguments().getString("frameProfileIncludeTimetable") == "true"
+        require(!includeTimetable || dockOnly) { "Timetable horizontal swipes belong to its week pager" }
+        val routes = if (includeTimetable) listOf("课表" to "课程", "课程" to "导入", "导入" to "设置",
+            "设置" to "导入", "导入" to "课程", "课程" to "课表")
+            else listOf("课程" to "导入", "导入" to "设置", "设置" to "导入", "导入" to "课程")
         val rounds = InstrumentationRegistry.getArguments().getString("frameProfileRounds")?.toInt() ?: 4
         require(rounds in 1..50)
         val collector = HandlerThread("navigation-frame-metrics").apply { start() }
@@ -100,8 +140,7 @@ class RootNavigationFrameProfileTest {
                 for (action in order) {
                     // A round trip covers all four directions without inserting
                     // unmeasured reset animations between adjacent trials.
-                    for ((source, target) in listOf("课程" to "导入", "导入" to "设置",
-                        "设置" to "导入", "导入" to "课程")) {
+                    for ((source, target) in routes) {
                             resetTo(source)
                             visited += source
                             val temperature = if (target in visited) "warm" else "first-entry"
@@ -121,6 +160,7 @@ class RootNavigationFrameProfileTest {
             val report = JSONObject().put("sdk", Build.VERSION.SDK_INT).put("device", Build.MODEL)
                 .put("hardware", Build.HARDWARE).put("refreshHz", refreshHz)
                 .put("label", InstrumentationRegistry.getArguments().getString("frameProfileLabel") ?: "current")
+                .put("wallpaper", InstrumentationRegistry.getArguments().getString("frameProfileWallpaper") ?: "existing")
                 .put("window", "down-to-settled").put("inputReadyCheck", "focused-painted-acknowledged")
                 .put("coordinateScaleX", coordinateScaleX).put("coordinateScaleY", coordinateScaleY)
                 .put("nativeWindowWidth", nativeWindowWidth).put("nativeWindowHeight", nativeWindowHeight)
@@ -309,6 +349,7 @@ class RootNavigationFrameProfileTest {
     private fun isPageActive(label: String): Boolean = nodes().any { (node, _) ->
             val text = node.text?.toString().orEmpty()
             node.isVisibleToUser && when (label) {
+                "课表" -> node.contentDescription?.toString() == "下一周"
                 "课程" -> text.startsWith("课程（")
                 "导入" -> text == "课程数据导入"
                 else -> text == "学期与课表"

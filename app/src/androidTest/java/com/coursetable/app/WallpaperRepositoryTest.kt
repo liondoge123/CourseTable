@@ -74,6 +74,23 @@ internal class WallpaperTestEnvironment : AutoCloseable {
 }
 
 class WallpaperRepositoryTest {
+    @Test fun readyLookupDoesNotDecodeAndMatchesTheRequestedBlurAndScale() = runBlocking {
+        WallpaperTestEnvironment().use { env ->
+            val config = env.repository.prepare(Uri.fromFile(env.source(1200, 1800)))
+            assertNull("A synchronous lookup must not start decoding", env.repository.cachedBitmap(config, 400f, 800f))
+            val image = env.repository.bitmap(config, 400f, 800f)
+            assertNotNull(image)
+            assertSame(image, env.repository.cachedBitmap(config, 400f, 800f))
+            assertSame(image, env.repository.cachedBitmap(config.copy(mask = .7f, positionX = 0f,
+                gridOpacity = .2f, cardOpacity = .4f), 400f, 800f))
+            val next = config.copy(blurDp = 24f, scale = 1.5f)
+            assertNull("A different filter must not reuse stale pixels", env.repository.cachedBitmap(next, 400f, 800f))
+            val filtered = env.repository.bitmap(next, 400f, 800f)
+            assertNotNull(filtered)
+            assertSame(filtered, env.repository.cachedBitmap(next, 400f, 800f))
+        }
+    }
+
     @Test fun draftIsPrivateAndOnlyApplyCommitsAcrossRestartAndTableSwitches() = runBlocking {
         WallpaperTestEnvironment().use { env ->
             val source = env.source()

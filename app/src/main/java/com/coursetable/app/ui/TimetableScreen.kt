@@ -47,8 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -121,6 +121,18 @@ fun TimetableScreen(
 
     val totalWeeks = settings.totalWeeks
     val displayedWeek = vm.displayedWeek()
+    var selectedConflict by remember(settings.timetableId, displayedWeek, vm.weekFilter, settings.showNonCurrentWeek) {
+        mutableStateOf<TimetableCourseBlock?>(null)
+    }
+    val activeConflict = remember(selectedConflict, courseIndex, displayedWeek, vm.weekFilter, settings.showNonCurrentWeek) {
+        selectedConflict?.let { selected ->
+            timetableCourseBlocks(courseIndex.forWeek(displayedWeek, settings.showNonCurrentWeek, vm.weekFilter))
+                .firstOrNull { it.items.size > 1 && it == selected }
+        }
+    }
+    LaunchedEffect(activeConflict) {
+        if (activeConflict == null) selectedConflict = null
+    }
     val todayWeek = vm.todayWeekNumber()
     val scope = rememberCoroutineScope()
 
@@ -144,6 +156,7 @@ fun TimetableScreen(
     }
 
     val wallpaperBitmap = rememberWallpaperBitmap(settings.wallpaper)
+    val wallpaperAxisStyle = rememberWallpaperAxisStyle(settings.wallpaper, wallpaperBitmap)
     androidx.compose.runtime.CompositionLocalProvider(LocalWallpaperActive provides (wallpaperBitmap != null),
         LocalWallpaperCardOpacity provides (settings.wallpaper?.normalized()?.cardOpacity ?: 1f)) {
         LiquidScrollablePage(wallpaperVisible = wallpaperBitmap != null, background = { WallpaperBackground(settings.wallpaper, wallpaperBitmap,
@@ -196,7 +209,9 @@ fun TimetableScreen(
                         todayDay = vm.today.dayOfWeek.value,
                         onCourseTap = { vm.showDetail(it) },
                         onCellTap = { day, section -> vm.openCellEditor(day, section) },
-                        onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null
+                        onAtBottomChanged = if (page == pagerState.currentPage) onAtBottomChanged else null,
+                        onConflictTap = { if (week == displayedWeek) selectedConflict = it },
+                        axisStyle = wallpaperAxisStyle
                     )
                 }
         }
@@ -219,6 +234,13 @@ fun TimetableScreen(
         )
     }
 
+    activeConflict?.let { block ->
+        TimetableConflictPicker(block, onDismiss = { selectedConflict = null }, onSelect = { course ->
+            selectedConflict = null
+            // Resolve the occurrence again after the chooser's closing animation.
+            courses.firstOrNull { it.id == course.id }?.let { vm.showDetail(it) }
+        })
+    }
     vm.detailCourse?.let { detail ->
         CourseDetailDialog(
             course = detail,
@@ -573,8 +595,11 @@ internal fun TimetableGrid(
     todayDay: Int,
     onCourseTap: (Course) -> Unit,
     onCellTap: (Int, Int) -> Unit,
-    onAtBottomChanged: ((Boolean) -> Unit)?
+    onAtBottomChanged: ((Boolean) -> Unit)?,
+    onConflictTap: (TimetableCourseBlock) -> Unit = {},
+    axisStyle: WallpaperAxisStyle? = null
 ) {
+    val blocks = remember(visible) { timetableCourseBlocks(visible) }
     val timeColW = TIME_COL_DP.dp
     val slotH = SLOT_H_DP.dp
     val headerH = HEADER_H_DP.dp
@@ -596,7 +621,6 @@ internal fun TimetableGrid(
     val surfaceColor = if (LocalWallpaperActive.current) MaterialTheme.colorScheme.surface.copy(
         alpha = settings.wallpaper?.normalized()?.gridOpacity ?: .65f)
         else MaterialTheme.colorScheme.surface
-    val todayColBg = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
     val containerCornerRadius = 12.dp
     val containerShape = RoundedCornerShape(containerCornerRadius)
     val viewportShape = RoundedCornerShape(
@@ -637,14 +661,10 @@ internal fun TimetableGrid(
                     .clip(containerShape)
                     .background(surfaceColor)
                     .drawBehind {
-                        val tw = timeColW.toPx()
                         val hh = headerH.toPx()
-                        val sh = slotH.toPx()
-                        val dw = (size.width - tw) / 7f
-
-                        if (highlightToday) {
-                            val x = tw + (todayDay - 1) * dw
-                            drawRect(todayColBg, topLeft = Offset(x, 0f), size = Size(dw, hh + sh * slots))
+                        axisStyle?.let {
+                            drawRect(it.scrim, size = Size(size.width, hh))
+                            drawRect(it.scrim, topLeft = Offset(0f, hh), size = Size(timeColW.toPx(), size.height - hh))
                         }
                         drawLine(lineColor, Offset(0f, hh), Offset(size.width, hh), 1.dp.toPx())
                     }
@@ -660,6 +680,7 @@ internal fun TimetableGrid(
                             label = WEEKDAY_NAMES[dayIndex],
                             date = date,
                             isToday = highlightToday && day == todayDay,
+                            axisStyle = axisStyle,
                             modifier = Modifier.width(dayW).height(headerH)
                         )
                     }
@@ -680,6 +701,7 @@ internal fun TimetableGrid(
                             ) {
                                 val period = periods.getOrNull(row)
                                 TimetablePeriodLabel(
+                                    axisStyle = axisStyle,
                                     section = row + 1,
                                     startTime = period?.start?.toString()?.substring(0, 5),
                                     endTime = period?.end?.toString()?.substring(0, 5),
@@ -704,10 +726,20 @@ internal fun TimetableGrid(
                             }
                     )
 
-                    visible.forEach { item ->
-                        key(item.course.id) {
-                            TimetableCourse(item, highlightToday && item.course.dayOfWeek == todayDay,
-                                currentTime, periods, timeColW, dayW, slotH, settings.cardAlignLeft, onCourseTap)
+                    blocks.forEach { block ->
+                        key(block.key) {
+                            if (block.items.size == 1) {
+                                val item = block.items.single()
+                                TimetableCourse(item, highlightToday && item.course.dayOfWeek == todayDay,
+                                    currentTime, periods, timeColW, dayW, slotH, settings, onCourseTap)
+                            } else {
+                                TimetableConflictCardSurface(block,
+                                    Modifier.offset(
+                                        x = dayW * (block.dayOfWeek - 1) + timeColW + 1.5.dp,
+                                        y = slotH * (block.startSection - 1) + 1.5.dp
+                                    ).size(dayW - 3.dp, slotH * block.duration - 3.dp),
+                                    onClick = { onConflictTap(block) })
+                            }
                         }
                     }
                 }
@@ -725,7 +757,7 @@ private fun TimetableCourse(
     timeColW: androidx.compose.ui.unit.Dp,
     dayW: androidx.compose.ui.unit.Dp,
     slotH: androidx.compose.ui.unit.Dp,
-    alignLeft: Boolean,
+    settings: AppSettings,
     onCourseTap: (Course) -> Unit
 ) {
     // Only today's scheduled cards observe the clock. A time tick must not
@@ -734,7 +766,7 @@ private fun TimetableCourse(
         PeriodUtils.calculateCourseProgress(item.course.startSection, item.course.duration,
             periods, currentTime.value)
     } else null
-    CourseCard(item.course, timeColW, dayW, slotH, alignLeft,
+    CourseCard(item.course, timeColW, dayW, slotH, settings,
         dimmed = !item.scheduledThisWeek, progress = progress, onClick = { onCourseTap(item.course) })
 }
 
@@ -744,7 +776,7 @@ private fun CourseCard(
     timeColW: androidx.compose.ui.unit.Dp,
     dayW: androidx.compose.ui.unit.Dp,
     slotH: androidx.compose.ui.unit.Dp,
-    alignLeft: Boolean,
+    settings: AppSettings,
     dimmed: Boolean,
     progress: Float? = null,
     onClick: () -> Unit
@@ -758,7 +790,10 @@ private fun CourseCard(
         location = course.location,
         accent = accent,
         duration = course.duration,
-        alignLeft = alignLeft,
+        alignLeft = settings.cardAlignLeft,
+        showTeacher = settings.cardShowTeacher,
+        showLocation = settings.cardShowLocation,
+        locationFirst = settings.cardLocationFirst,
         dimmed = dimmed,
         progress = progress,
         onClick = onClick,

@@ -47,7 +47,14 @@ internal fun rememberWallpaperImage(config: WallpaperConfig?, repository: Wallpa
     val density = LocalDensity.current.density
     // Position and mask updates must not restart decoding or filtering.
     val key = config?.let { listOf(it.imageId, it.blurDp, it.scale, viewport, density) }
-    val loaded by produceState<Triple<String?, Bitmap?, Any?>>(Triple(null, null, null), key, repository) {
+    // Root tabs are disposed between visits. Start with their ready pixels instead of
+    // clearing the background/card material and rebuilding it during the slide.
+    val cached = remember(key, repository) {
+        config?.let { repository.cachedBitmap(it, viewport.width.coerceAtLeast(1) / density,
+            viewport.height.coerceAtLeast(1) / density) }
+    }
+    val loaded by produceState<Triple<String?, Bitmap?, Any?>>(
+        Triple(if (cached != null) config?.imageId else null, cached, if (cached != null) key else null), key, repository) {
         val bitmap = try {
             config?.let { repository.bitmap(it, viewport.width.coerceAtLeast(1) / density, viewport.height.coerceAtLeast(1) / density) }
         } catch (e: CancellationException) { throw e }

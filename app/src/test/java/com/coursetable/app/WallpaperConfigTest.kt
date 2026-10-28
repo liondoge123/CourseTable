@@ -1,6 +1,7 @@
 package com.coursetable.app
 
 import com.coursetable.app.data.WallpaperConfig
+import com.coursetable.app.data.WallpaperTextMode
 import com.coursetable.app.ui.wallpaperPlacement
 import org.junit.Assert.*
 import org.junit.Test
@@ -76,5 +77,17 @@ class WallpaperConfigTest {
             assertEquals(0f, placed.origin.y, .01f)
             assertTrue(placed.size.width >= width && placed.size.height >= height)
         }
+    }
+
+    @Test fun legacyWallpapersEnableAutomaticTextProtectionAndChoicesRoundTrip() {
+        val legacy = WallpaperConfig.decode("{\"imageId\":\"$id\"}")!!
+        assertEquals(WallpaperTextMode.AUTO, legacy.textMode)
+        assertTrue(legacy.textClarity)
+        for (mode in WallpaperTextMode.entries) for (clarity in listOf(false, true)) {
+            val config = legacy.copy(textMode = mode, textClarity = clarity, gridOpacity = .1f, cardOpacity = .4f)
+            assertEquals(config, WallpaperConfig.decode(config.encode()))
+        }
+        assertEquals(WallpaperTextMode.AUTO,
+            WallpaperConfig.decode("{\"imageId\":\"$id\",\"textMode\":\"unknown\"}")!!.textMode)
     }
 }

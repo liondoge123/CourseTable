@@ -21,6 +21,7 @@ import com.coursetable.app.ui.liquid.AlertDialog
 import com.coursetable.app.ui.liquid.Text
 import com.coursetable.app.ui.liquid.TextButton
 import com.coursetable.app.ui.theme.LiquidTheme
+import com.coursetable.app.ui.theme.tabularNumbers
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
@@ -148,7 +149,7 @@ internal fun CourseTimeWheel(
                 Text(formatter(value), maxLines = 1, textAlign = TextAlign.Center,
                     color = if (value == centeredValue) LiquidTheme.colorScheme.onSurface
                         else LiquidTheme.colorScheme.onSurfaceVariant,
-                    style = LiquidTheme.typography.bodyLarge,
+                    style = LiquidTheme.typography.bodyLarge.tabularNumbers(),
                     fontWeight = if (value == centeredValue) FontWeight.SemiBold else FontWeight.Normal)
             }
         }
