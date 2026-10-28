@@ -10,7 +10,8 @@ Public release notes describe user-facing changes and installation instructions.
 - Release title: `CourseTable v{versionName}`
 - `versionName`: semantic version in `MAJOR.MINOR.PATCH` format
 - `versionCode`: a positive integer incremented for every published Android release
-- Breaking changes increment `MAJOR`, backward-compatible features increment `MINOR`, and fixes or UI refinements increment `PATCH`
+- Normally, breaking changes suggest `MAJOR`, backward-compatible features suggest `MINOR`, and fixes or UI refinements suggest `PATCH`; the user's explicitly chosen release number takes precedence.
+- Before any `MINOR` or `MAJOR` increase (for example, `1.9.x` to `1.10.0`), explain the reason and obtain the user's explicit approval for that version. Do not treat a general instruction to continue work or publish as approval for a larger version jump. Once an exact version is approved, do not ask again for the same version.
 
 ## Git version management
 

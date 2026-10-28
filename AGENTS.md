@@ -5,6 +5,7 @@
 - Follow the versioning and artifact rules in `RELEASE.md` whenever creating a release build.
 - Use `pwsh scripts/build-apk.ps1 preview` for installable test packages and `pwsh scripts/build-apk.ps1 release` for formal releases (fallback to `powershell` if `pwsh` is unavailable).
 - Increment both `versionCode` and the appropriate semantic component of `versionName` for a published release.
+- Before increasing MINOR or MAJOR (for example, 1.9.x to 1.10.0), explain the reason and obtain the user's explicit approval for the exact version. General permission to continue or publish does not authorize a larger version jump. The user's chosen release number takes precedence over the default semantic-version suggestion; do not re-request approval for an already approved exact version.
 - Name APK artifacts `CourseTable-v{versionName}-{ABI}-{buildType}.apk`.
 - Do not use ambiguous suffixes such as `ui` in release artifact names.
 - Verify signing, package name, version, ABI, and SHA-256 before handing off an APK.
