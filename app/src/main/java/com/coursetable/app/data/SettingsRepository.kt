@@ -41,11 +41,16 @@ data class AppSettings(
     val periods: List<PeriodTime> = defaultPeriods(),
     val periodDurationMinutes: Int = 45,
     val cardAlignLeft: Boolean = false,
+    val cardShowTeacher: Boolean = true,
+    val cardShowLocation: Boolean = true,
+    val cardLocationFirst: Boolean = false,
     val showNonCurrentWeek: Boolean = true,
     val themeMode: String = "auto",
     val themeColor: String = "blue",
     val reminderEnabled: Boolean = false,
     val reminderMinutes: Int = 15,
+    val reminderUseAlarmClock: Boolean = false,
+    val reminderBackend: ReminderBackend = ReminderBackend.APP,
     val activePeriodSchemeId: String? = null,
     val wallpaper: WallpaperConfig? = null,
     val glassEffect: String = GlassEffect.STANDARD.key
@@ -83,6 +88,9 @@ class SettingsRepository(
 
         val ACTIVE_TIMETABLE_ID = longPreferencesKey("active_timetable_id")
         val CARD_ALIGN_LEFT = intPreferencesKey("card_align_left")
+        val CARD_SHOW_TEACHER = intPreferencesKey("card_show_teacher")
+        val CARD_SHOW_LOCATION = intPreferencesKey("card_show_location")
+        val CARD_LOCATION_FIRST = intPreferencesKey("card_location_first")
         val SHOW_NON_CURRENT_WEEK = intPreferencesKey("show_non_current_week")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_COLOR = stringPreferencesKey("theme_color")
@@ -90,6 +98,8 @@ class SettingsRepository(
         val WALLPAPER = stringPreferencesKey("timetable_wallpaper")
         val REMINDER_ENABLED = intPreferencesKey("reminder_enabled")
         val REMINDER_MINUTES = intPreferencesKey("reminder_minutes")
+        val REMINDER_USE_ALARM_CLOCK = intPreferencesKey("reminder_use_alarm_clock")
+        val REMINDER_BACKEND = stringPreferencesKey("reminder_backend")
         val PERIOD_TIME_SCHEMES = stringPreferencesKey("period_time_schemes_json")
     }
 
@@ -232,12 +242,17 @@ class SettingsRepository(
             periods = periods,
             periodDurationMinutes = if (t.periodsCsv.isBlank()) defaultDuration else t.periodDurationMinutes,
             cardAlignLeft = (prefs[Keys.CARD_ALIGN_LEFT] ?: 0) == 1,
+            cardShowTeacher = (prefs[Keys.CARD_SHOW_TEACHER] ?: 1) == 1,
+            cardShowLocation = (prefs[Keys.CARD_SHOW_LOCATION] ?: 1) == 1,
+            cardLocationFirst = (prefs[Keys.CARD_LOCATION_FIRST] ?: 0) == 1,
             showNonCurrentWeek = (prefs[Keys.SHOW_NON_CURRENT_WEEK] ?: 1) == 1,
             themeMode = prefs[Keys.THEME_MODE] ?: AppSettings().themeMode,
             themeColor = prefs[Keys.THEME_COLOR] ?: AppSettings().themeColor,
             glassEffect = GlassEffect.fromKey(prefs[Keys.GLASS_EFFECT]).key,
             reminderEnabled = (prefs[Keys.REMINDER_ENABLED] ?: 0) == 1,
             reminderMinutes = (prefs[Keys.REMINDER_MINUTES] ?: 15).coerceIn(5, 60),
+            reminderUseAlarmClock = (prefs[Keys.REMINDER_USE_ALARM_CLOCK] ?: 0) == 1,
+            reminderBackend = ReminderBackend.fromKey(prefs[Keys.REMINDER_BACKEND]),
             activePeriodSchemeId = t.periodSchemeId ?: prefs[activeSchemeKey],
             wallpaper = WallpaperConfig.decode(prefs[Keys.WALLPAPER])
         )
@@ -258,17 +273,27 @@ class SettingsRepository(
         reminderEnabled: Boolean? = null,
         reminderMinutes: Int? = null,
         activeTimetableId: Long? = null,
-        glassEffect: String? = null
+        glassEffect: String? = null,
+        cardShowTeacher: Boolean? = null,
+        cardShowLocation: Boolean? = null,
+        cardLocationFirst: Boolean? = null,
+        reminderUseAlarmClock: Boolean? = null,
+        reminderBackend: ReminderBackend? = null
     ) {
         // DataStore 部分
         preferences.edit { prefs ->
             if (cardAlignLeft != null) prefs[Keys.CARD_ALIGN_LEFT] = if (cardAlignLeft) 1 else 0
+            if (cardShowTeacher != null) prefs[Keys.CARD_SHOW_TEACHER] = if (cardShowTeacher) 1 else 0
+            if (cardShowLocation != null) prefs[Keys.CARD_SHOW_LOCATION] = if (cardShowLocation) 1 else 0
+            if (cardLocationFirst != null) prefs[Keys.CARD_LOCATION_FIRST] = if (cardLocationFirst) 1 else 0
             if (showNonCurrentWeek != null) prefs[Keys.SHOW_NON_CURRENT_WEEK] = if (showNonCurrentWeek) 1 else 0
             if (themeMode != null) prefs[Keys.THEME_MODE] = themeMode
             if (themeColor != null) prefs[Keys.THEME_COLOR] = themeColor
             if (glassEffect != null) prefs[Keys.GLASS_EFFECT] = GlassEffect.fromKey(glassEffect).key
             if (reminderEnabled != null) prefs[Keys.REMINDER_ENABLED] = if (reminderEnabled) 1 else 0
             if (reminderMinutes != null) prefs[Keys.REMINDER_MINUTES] = reminderMinutes.coerceIn(5, 60)
+            if (reminderUseAlarmClock != null) prefs[Keys.REMINDER_USE_ALARM_CLOCK] = if (reminderUseAlarmClock) 1 else 0
+            if (reminderBackend != null) prefs[Keys.REMINDER_BACKEND] = reminderBackend.key
             if (activeTimetableId != null) prefs[Keys.ACTIVE_TIMETABLE_ID] = activeTimetableId
         }
         // Room（当前课表）部分
@@ -292,13 +317,18 @@ class SettingsRepository(
         totalWeeks = settings.totalWeeks,
         periods = settings.periods,
         cardAlignLeft = settings.cardAlignLeft,
+        cardShowTeacher = settings.cardShowTeacher,
+        cardShowLocation = settings.cardShowLocation,
+        cardLocationFirst = settings.cardLocationFirst,
         periodDurationMinutes = settings.periodDurationMinutes,
         showNonCurrentWeek = settings.showNonCurrentWeek,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
         glassEffect = settings.glassEffect,
         reminderEnabled = settings.reminderEnabled,
-        reminderMinutes = settings.reminderMinutes
+        reminderMinutes = settings.reminderMinutes,
+        reminderUseAlarmClock = settings.reminderUseAlarmClock,
+        reminderBackend = settings.reminderBackend
     )
 
     /** 读取旧版本存储在 DataStore 的学期设置（用于迁移播种），读取后清除 */

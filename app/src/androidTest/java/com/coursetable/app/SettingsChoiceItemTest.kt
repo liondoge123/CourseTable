@@ -215,6 +215,7 @@ class SettingsChoiceItemTest {
         val original = runBlocking { app.settingsRepository.settings.first() }
         try {
             compose.setContent { CourseTableTheme { LiquidBackdropHost(Modifier.fillMaxSize()) { SettingsScreen() } } }
+            compose.onNodeWithText("课程卡片设置").performScrollTo().performClick()
             compose.onNodeWithText("课程卡片文字对齐").performScrollTo().performClick()
             val initialKey = if (original.cardAlignLeft) "left" else "center"
             compose.onNodeWithTag("card-align-$initialKey").assertIsSelected()

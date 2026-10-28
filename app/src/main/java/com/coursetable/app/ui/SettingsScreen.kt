@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -49,11 +52,14 @@ import com.coursetable.app.CourseApp
 import com.coursetable.app.importer.BackupManager
 import com.coursetable.app.importer.IcsExporter
 import com.coursetable.app.reminder.ReminderScheduler
+import com.coursetable.app.reminder.ReminderStatus
 import com.coursetable.app.ui.icons.Icons
 import com.coursetable.app.ui.liquid.*
 import com.coursetable.app.ui.theme.ThemeColor
 import com.coursetable.app.ui.theme.ThemeMode
 import com.coursetable.app.data.GlassEffect
+import com.coursetable.app.data.ReminderBackend
+import com.coursetable.app.reminder.SystemCalendarReminders
 import com.coursetable.app.ui.theme.LiquidTheme as MaterialTheme
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.time.Instant
@@ -71,9 +77,15 @@ private enum class SettingsSubpage {
     TIMETABLE_MANAGE,
     PERIOD_TIMES,
     PERMISSIONS,
+    REMINDER_STATUS,
+    REMINDER_METHOD,
     ABOUT,
-    WALLPAPER
+    COURSE_DISPLAY,
+    APPEARANCE,
+    DATA
 }
+
+private enum class ReminderAction { ENABLE, DISABLE, APP, CALENDAR, SYNC, TEST_CALENDAR, GRANT_CALENDAR }
 
 @Composable
 fun SettingsScreen(
@@ -128,24 +140,21 @@ fun SettingsScreen(
         onDispose { onSubpageChanged(false) }
     }
 
-    // 提醒排程状态（设置变更后延迟刷新，等待异步重排完成）
-    var statusTick by remember { mutableIntStateOf(0) }
-    val reminderStatus = remember(statusTick, settings.reminderEnabled, settings.reminderMinutes, courses) {
-        ReminderScheduler.status(context)
-    }
-    LaunchedEffect(settings.reminderEnabled, settings.reminderMinutes, courses.size) {
-        if (settings.reminderEnabled) {
-            kotlinx.coroutines.delay(1500)
-            statusTick++
-        }
-    }
+    val reminderStatusFlow = remember(context) { ReminderScheduler.observeStatus(context) }
+    val initialReminderStatus = remember(context) { ReminderScheduler.status(context) }
+    val reminderStatus by reminderStatusFlow.collectAsState(initial = initialReminderStatus)
 
     // 权限状态：每次从系统设置页返回（ON_RESUME）时重新检查
     var permTick by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, settings.reminderBackend, settings.reminderEnabled) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) permTick++
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                permTick++
+                if (settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR && settings.reminderEnabled) {
+                    ReminderScheduler.reschedule(context)
+                }
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -153,6 +162,13 @@ fun SettingsScreen(
     val permNotification = remember(permTick) { ReminderScheduler.canPostNotifications(context) }
     val permChannelHigh = remember(permTick) { ReminderScheduler.isChannelHighImportance(context) }
     val permExactAlarm = remember(permTick) { ReminderScheduler.canScheduleExactAlarms(context) }
+    val reminderBackground = remember(permTick) {
+        com.coursetable.app.reminder.ReminderBackgroundStatus.read(context)
+    }
+    val calendarPermissionGranted = remember(permTick) { SystemCalendarReminders.hasPermissions(context) }
+    var reminderRequest by rememberSaveable { mutableStateOf<ReminderAction?>(null) }
+    var reminderPermissionInFlight by rememberSaveable { mutableStateOf(false) }
+    var reminderBusy by remember { mutableStateOf(false) }
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -183,31 +199,96 @@ fun SettingsScreen(
         }
     }
 
-    // 开启课前提醒时申请通知权限
+    // Permission prompts precede any calendar write or backend change.
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        scope.launch { settingsRepo.save(reminderEnabled = true) }
+        reminderPermissionInFlight = false
+        permTick++
         if (!granted) {
-            toast("未授予通知权限，可能无法收到提醒")
-        }
-        if (!ReminderScheduler.canScheduleExactAlarms(context)) ReminderScheduler.openExactAlarmSettings(context)
-    }
-
-    /** 开启提醒：先确保通知权限，再引导授予精确闹钟特殊访问。 */
-    fun enableReminder() {
-        fun afterPermission() {
-            scope.launch { settingsRepo.save(reminderEnabled = true) }
-            if (!ReminderScheduler.canScheduleExactAlarms(context)) ReminderScheduler.openExactAlarmSettings(context)
-        }
-        if (ReminderScheduler.canPostNotifications(context)) {
-            afterPermission()
-        } else if (android.os.Build.VERSION.SDK_INT >= 33) {
-            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            afterPermission()
+            reminderRequest = null
+            toast("未允许通知，提醒设置未更改")
+        } else if (!ReminderScheduler.canPostNotifications(context)) {
+            // Some device policies can keep the effective app switch off despite a runtime grant.
+            reminderRequest = null
+            toast("请在系统设置中允许课程表发送通知")
+            ReminderScheduler.openAppNotificationSettings(context)
         }
     }
+    val calendarPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        reminderPermissionInFlight = false
+        permTick++
+        if (!SystemCalendarReminders.hasPermissions(context)) {
+            reminderRequest = null
+            toast("未允许日历读写权限，提醒方式和已同步日程未更改")
+        }
+    }
+    fun requestReminderAction(action: ReminderAction) {
+        if (!reminderBusy && !reminderPermissionInFlight) reminderRequest = action
+    }
+    LaunchedEffect(reminderRequest, permTick, reminderPermissionInFlight) {
+        val action = reminderRequest ?: return@LaunchedEffect
+        if (reminderBusy || reminderPermissionInFlight) return@LaunchedEffect
+        val calendarNeeded = when (action) {
+            ReminderAction.ENABLE -> settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR
+            ReminderAction.DISABLE, ReminderAction.APP -> SystemCalendarReminders.mayHaveEvents(context)
+            ReminderAction.CALENDAR -> settings.reminderEnabled
+            else -> true
+        }
+        if (calendarNeeded && !SystemCalendarReminders.hasPermissions(context)) {
+            reminderPermissionInFlight = true
+            calendarPermission.launch(SystemCalendarReminders.requiredPermissions)
+            return@LaunchedEffect
+        }
+        val needsAppNotification = (action == ReminderAction.ENABLE && settings.reminderBackend == ReminderBackend.APP) ||
+            (action == ReminderAction.APP && settings.reminderEnabled)
+        if (needsAppNotification && !ReminderScheduler.canPostNotifications(context)) {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                reminderPermissionInFlight = true
+                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                reminderRequest = null
+                toast("请先允许课程表发送通知")
+                ReminderScheduler.openAppNotificationSettings(context)
+            }
+            return@LaunchedEffect
+        }
+        reminderRequest = null
+        reminderBusy = true
+        scope.launch {
+            try {
+                when (action) {
+                    ReminderAction.ENABLE -> ReminderScheduler.configure(context, enabled = true)
+                    ReminderAction.DISABLE -> ReminderScheduler.configure(context, enabled = false)
+                    ReminderAction.APP -> ReminderScheduler.configure(context, backend = ReminderBackend.APP)
+                    ReminderAction.CALENDAR -> ReminderScheduler.configure(context, backend = ReminderBackend.SYSTEM_CALENDAR)
+                    ReminderAction.SYNC -> ReminderScheduler.rescheduleNow(context)
+                    ReminderAction.TEST_CALENDAR -> {
+                        ReminderScheduler.scheduleCalendarTest(context)
+                        toast("测试日程已写入，请回到桌面等待约 1 分钟")
+                    }
+                    ReminderAction.GRANT_CALENDAR -> if (settings.reminderEnabled) ReminderScheduler.rescheduleNow(context)
+                }
+                if (action == ReminderAction.APP || action == ReminderAction.CALENDAR) {
+                    activeSubpage = SettingsSubpage.PERMISSIONS
+                }
+                if (action == ReminderAction.ENABLE && settings.reminderBackend == ReminderBackend.APP &&
+                    !ReminderScheduler.canScheduleExactAlarms(context)) {
+                    toast("提醒已开启，尚未允许精确闹钟，可在权限检查中设置")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                toast("提醒设置或日历同步未完成，请检查权限后重试")
+            } finally {
+                reminderBusy = false
+                permTick++
+            }
+        }
+    }
+    fun enableReminder() = requestReminderAction(ReminderAction.ENABLE)
 
     val exportIcs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/calendar")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -321,8 +402,6 @@ fun SettingsScreen(
         if (isChild) {
             CompositionLocalProvider(LocalPageScrollKey provides subpageScrollVisit) {
                 when (displayedSubpage ?: activeSubpage) {
-                    SettingsSubpage.WALLPAPER -> WallpaperEditorScreen(settings, courses.filter { it.timetableId == settings.timetableId },
-                        onBack = { activeSubpage = null })
                     SettingsSubpage.TIMETABLE_MANAGE -> {
                         TimetableManageScreen(
                             timetables = timetables,
@@ -368,13 +447,188 @@ fun SettingsScreen(
                         )
                     }
                     SettingsSubpage.PERMISSIONS -> {
-                        PermissionCheckScreen(
+                        if (settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR) CalendarReminderSetupScreen(
+                            granted = calendarPermissionGranted,
+                            enabled = settings.reminderEnabled,
+                            status = reminderStatus,
+                            busy = reminderBusy || reminderPermissionInFlight,
+                            onGrant = { requestReminderAction(ReminderAction.GRANT_CALENDAR) },
+                            onSync = { requestReminderAction(ReminderAction.SYNC) },
+                            onTest = { requestReminderAction(ReminderAction.TEST_CALENDAR) },
+                            onOpenCalendar = {
+                                try { SystemCalendarReminders.openCalendar(context) }
+                                catch (_: Exception) { toast("未找到可打开的手机日历，请先安装或启用日历应用") }
+                            },
+                            onBack = { activeSubpage = null },
+                            bottomContentPadding = bottomContentPadding
+                        ) else PermissionCheckScreen(
                             notificationEnabled = permNotification,
                             bannerEnabled = permChannelHigh,
                             exactAlarmAllowed = permExactAlarm,
+                            backgroundStatus = reminderBackground,
+                            reminderStatus = reminderStatus,
+                            useAlarmClock = settings.reminderUseAlarmClock,
                             onBack = { activeSubpage = null },
                             bottomContentPadding = bottomContentPadding
                         )
+                    }
+                    SettingsSubpage.REMINDER_METHOD -> ReminderMethodScreen(
+                        backend = settings.reminderBackend,
+                        busy = reminderBusy || reminderPermissionInFlight,
+                        onSelect = { backend -> requestReminderAction(if (backend == ReminderBackend.APP)
+                            ReminderAction.APP else ReminderAction.CALENDAR) },
+                        onSetup = { activeSubpage = SettingsSubpage.PERMISSIONS },
+                        onBack = { activeSubpage = null },
+                        bottomContentPadding = bottomContentPadding
+                    )
+                    SettingsSubpage.REMINDER_STATUS -> ReminderStatusPage(
+                        status = reminderStatus,
+                        enabled = settings.reminderEnabled,
+                        bottomContentPadding = bottomContentPadding,
+                        onBack = { activeSubpage = null }
+                    )
+                    SettingsSubpage.COURSE_DISPLAY -> SettingsDetailPage(
+                        title = "课程卡片设置", tag = "course-display-page",
+                        bottomContentPadding = bottomContentPadding,
+                        onBack = { activeSubpage = null }
+                    ) {
+                        SettingsGroup(title = "卡片内容与排列") {
+                            SettingItem(
+                                icon = Icons.Filled.Person,
+                                title = "显示教师",
+                                subtitle = "在课程卡片中显示任课教师",
+                                onClick = { scope.launch { settingsRepo.save(cardShowTeacher = !settings.cardShowTeacher) } },
+                                trailing = {
+                                    Switch(checked = settings.cardShowTeacher,
+                                        onCheckedChange = { scope.launch { settingsRepo.save(cardShowTeacher = it) } })
+                                }
+                            )
+                            SettingsDivider()
+                            SettingItem(
+                                icon = Icons.Filled.LocationOn,
+                                title = "显示地点",
+                                subtitle = "在课程卡片中显示上课地点",
+                                onClick = { scope.launch { settingsRepo.save(cardShowLocation = !settings.cardShowLocation) } },
+                                trailing = {
+                                    Switch(checked = settings.cardShowLocation,
+                                        onCheckedChange = { scope.launch { settingsRepo.save(cardShowLocation = it) } })
+                                }
+                            )
+                            SettingsDivider()
+                            SettingsChoiceItem(
+                                id = "card-info-order", icon = Icons.Filled.FormatAlignLeft,
+                                title = "教师与地点顺序",
+                                selectedKey = if (settings.cardLocationFirst) "location-first" else "teacher-first",
+                                choices = listOf(SettingsChoice("teacher-first", "教师在前"), SettingsChoice("location-first", "地点在前")),
+                                onSelect = { scope.launch { settingsRepo.save(cardLocationFirst = it == "location-first") } }
+                            )
+                            SettingsDivider()
+                            SettingsChoiceItem(
+                                id = "card-align", icon = Icons.Filled.FormatAlignLeft,
+                                title = "课程卡片文字对齐",
+                                selectedKey = if (settings.cardAlignLeft) "left" else "center",
+                                choices = listOf(SettingsChoice("center", "居中"), SettingsChoice("left", "靠左")),
+                                onSelect = { scope.launch { settingsRepo.save(cardAlignLeft = it == "left") } }
+                            )
+                        }
+                    }
+                    SettingsSubpage.APPEARANCE -> {
+                        var editingWallpaper by rememberSaveable { mutableStateOf(false) }
+                        val wallpaperVisit = rememberPageScrollVisit(if (editingWallpaper) "wallpaper" else null)
+                        PredictivePageTransition(targetState = editingWallpaper, onBack = { editingWallpaper = false }) { isWallpaper ->
+                            if (isWallpaper) {
+                                CompositionLocalProvider(LocalPageScrollKey provides wallpaperVisit) {
+                                    WallpaperEditorScreen(settings, courses.filter { it.timetableId == settings.timetableId },
+                                        onBack = { editingWallpaper = false })
+                                }
+                            } else SettingsDetailPage(
+                                title = "外观设置", tag = "appearance-settings-page",
+                                bottomContentPadding = bottomContentPadding,
+                                onBack = { activeSubpage = null }
+                            ) {
+                                SettingsGroup(title = "颜色与背景") {
+                                    ThemeColorItem(
+                                        selected = ThemeColor.fromKey(settings.themeColor),
+                                        onSelect = { color -> scope.launch { settingsRepo.save(themeColor = color.key) } }
+                                    )
+                                    SettingsDivider()
+                                    SettingsChoiceItem(
+                                        id = "glass-effect",
+                                        icon = Icons.Filled.Palette,
+                                        title = "玻璃效果",
+                                        selectedKey = GlassEffect.fromKey(settings.glassEffect).key,
+                                        choices = GlassEffect.entries.map { SettingsChoice(it.key, it.label) },
+                                        onSelect = { scope.launch { settingsRepo.save(glassEffect = it) } }
+                                    )
+                                    SettingsDivider()
+                                    val wallpaperThumbnail = rememberWallpaperBitmap(settings.wallpaper)
+                                    SettingItem(
+                                        icon = Icons.Filled.Palette,
+                                        title = "课表壁纸",
+                                        subtitle = if (settings.wallpaper == null) "未设置" else if (wallpaperThumbnail == null) "已设置 · 点此编辑或更换" else "已设置 · 所有课表共用",
+                                        onClick = { editingWallpaper = true },
+                                        trailing = {
+                                            if (wallpaperThumbnail != null) WallpaperBackground(settings.wallpaper, wallpaperThumbnail,
+                                                Modifier.size(42.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
+                                            else ListItemChevron()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    SettingsSubpage.DATA -> SettingsDetailPage(
+                        title = "备份与分享", tag = "data-settings-page",
+                        bottomContentPadding = bottomContentPadding,
+                        onBack = { activeSubpage = null }
+                    ) {
+                        SettingsGroup(title = "数据与安全") {
+                            SettingItem(
+                                icon = Icons.Filled.IosShare,
+                                title = "复制当前课表分享文本",
+                                subtitle = "同学可通过「粘贴导入」校对后导入",
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            val sharedCourses = courseRepo.byTimetableOnce(settings.timetableId)
+                                            val text = withContext(Dispatchers.Default) {
+                                                com.coursetable.app.importer.PasteTimetableImporter.share(sharedCourses, settings.timetableName)
+                                            }
+                                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("课表分享", text))
+                                            toast("已复制当前课表，可发送给同学")
+                                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                        catch (e: Exception) { toast(e.message ?: "分享失败，请重试") }
+                                    }
+                                }
+                            )
+                            SettingsDivider()
+                            SettingItem(
+                                icon = Icons.Filled.Save,
+                                title = "导出备份文件",
+                                subtitle = "JSON 格式，可用于恢复",
+                                onClick = {
+                                    exportBackup.launch("coursetable_backup_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.json")
+                                }
+                            )
+                            SettingsDivider()
+                            SettingItem(
+                                icon = Icons.Filled.IosShare,
+                                title = "导出 ICS 日历",
+                                subtitle = "仅导出当前课表，可导入系统日历",
+                                onClick = {
+                                    exportIcs.launch("coursetable_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.ics")
+                                }
+                            )
+                            SettingsDivider()
+                            SettingItem(
+                                icon = Icons.Filled.DeleteForever,
+                                title = "清空所有课程",
+                                subtitle = "建议先导出备份",
+                                tint = MaterialTheme.colorScheme.error,
+                                onClick = { showClearConfirmDialog = true }
+                            )
+                        }
                     }
                     SettingsSubpage.ABOUT -> {
                         AboutScreen(
@@ -441,12 +695,18 @@ fun SettingsScreen(
         }
 
         SettingsGroup(title = "课程显示") {
-            SettingsChoiceItem(
-                id = "card-align", icon = Icons.Filled.FormatAlignLeft,
-                title = "课程卡片文字对齐",
-                selectedKey = if (settings.cardAlignLeft) "left" else "center",
-                choices = listOf(SettingsChoice("center", "居中"), SettingsChoice("left", "靠左")),
-                onSelect = { scope.launch { settingsRepo.save(cardAlignLeft = it == "left") } }
+            val visibleFields = listOfNotNull(
+                "教师".takeIf { settings.cardShowTeacher },
+                "地点".takeIf { settings.cardShowLocation }
+            )
+            val cardSummary = if (visibleFields.isEmpty()) "仅显示课程名" else
+                "显示${visibleFields.joinToString("、")}" +
+                    if (visibleFields.size == 2) " · " + if (settings.cardLocationFirst) "地点在前" else "教师在前" else ""
+            SettingItem(
+                icon = Icons.Filled.FormatAlignLeft,
+                title = "课程卡片设置",
+                subtitle = cardSummary,
+                onClick = { activeSubpage = SettingsSubpage.COURSE_DISPLAY }
             )
             SettingsDivider()
             SettingItem(
@@ -469,10 +729,11 @@ fun SettingsScreen(
             SettingItem(
                 icon = Icons.Filled.Notifications,
                 title = "课前提醒",
-                subtitle = if (settings.reminderEnabled) "已开启" else "上课前发送系统通知",
+                subtitle = if (reminderBusy) "正在处理提醒设置…" else if (settings.reminderEnabled)
+                    "已开启 · ${settings.reminderBackend.label}" else "上课前发送提醒",
                 onClick = {
                     if (settings.reminderEnabled) {
-                        scope.launch { settingsRepo.save(reminderEnabled = false) }
+                        requestReminderAction(ReminderAction.DISABLE)
                     } else {
                         enableReminder()
                     }
@@ -482,10 +743,17 @@ fun SettingsScreen(
                         checked = settings.reminderEnabled,
                         onCheckedChange = { enable ->
                             if (enable) enableReminder()
-                            else scope.launch { settingsRepo.save(reminderEnabled = false) }
+                            else requestReminderAction(ReminderAction.DISABLE)
                         }
                     )
                 }
+            )
+            SettingsDivider()
+            SettingItem(
+                icon = Icons.Filled.Schedule,
+                title = "提醒方式",
+                subtitle = settings.reminderBackend.label,
+                onClick = { activeSubpage = SettingsSubpage.REMINDER_METHOD }
             )
             if (settings.reminderEnabled) {
                 SettingsDivider()
@@ -505,41 +773,48 @@ fun SettingsScreen(
                     }
                 )
 
-                // 排程状态
-                val statusLine = buildString {
-                    when {
-                        reminderStatus.scheduledCount <= 0 -> append("未排程任何提醒（未来 7 天没有课？）")
-                        reminderStatus.nextTriggerMillis <= 0L -> append("已排程 ${reminderStatus.scheduledCount} 个提醒")
-                        else -> {
-                            val dt = java.time.LocalDateTime.ofInstant(
-                                java.time.Instant.ofEpochMilli(reminderStatus.nextTriggerMillis),
-                                java.time.ZoneId.systemDefault()
+                if (settings.reminderBackend == ReminderBackend.APP) {
+                    SettingsDivider()
+                    SettingItem(
+                        icon = Icons.Filled.Schedule,
+                        title = "准时优先",
+                        subtitle = "使用系统闹钟触发通知，部分手机可能显示闹钟标记。图标是否出现不代表提醒是否生效，仍需按手机要求允许后台运行。",
+                        onClick = {
+                            scope.launch { settingsRepo.save(reminderUseAlarmClock = !settings.reminderUseAlarmClock) }
+                        },
+                        trailing = {
+                            Switch(
+                                checked = settings.reminderUseAlarmClock,
+                                onCheckedChange = { enabled ->
+                                    scope.launch { settingsRepo.save(reminderUseAlarmClock = enabled) }
+                                }
                             )
-                            append("下次提醒：${dt.monthValue}月${dt.dayOfMonth}日 ")
-                            append(String.format(Locale.ROOT, "%02d:%02d", dt.hour, dt.minute))
-                            append(" · ${reminderStatus.nextCourseName} · 共 ${reminderStatus.scheduledCount} 个")
                         }
-                    }
-                    if (reminderStatus.lastError.isNotBlank()) append("\n${reminderStatus.lastError}")
-                    if (reminderStatus.firedLog.isNotEmpty()) {
-                        append("\n最近触发：")
-                        reminderStatus.firedLog.forEach { append("\n  $it") }
-                    }
+                    )
                 }
-                SettingsDivider()
-                SettingItem(
-                    icon = Icons.Filled.EventNote,
-                    title = "排程状态",
-                    subtitle = statusLine,
-                    onClick = { statusTick++ }
-                )
             }
-            val permIssues = listOf(permNotification, permChannelHigh, permExactAlarm).count { !it }
+            SettingsDivider()
+            SettingItem(
+                icon = Icons.Filled.EventNote,
+                title = "排程状态",
+                subtitle = when {
+                    !settings.reminderEnabled -> "提醒已关闭"
+                    reminderStatus.lastError.isNotBlank() -> "排程异常 · 查看详情"
+                    reminderStatus.scheduledCount <= 0 -> "暂无待提醒课程"
+                    else -> "已排程 ${reminderStatus.scheduledCount} 个提醒"
+                },
+                onClick = { activeSubpage = SettingsSubpage.REMINDER_STATUS }
+            )
+            val permIssues = if (settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR)
+                if (calendarPermissionGranted) 0 else 1
+                else listOf(permNotification, permChannelHigh, permExactAlarm).count { !it }
             SettingsDivider()
             SettingItem(
                 icon = Icons.Filled.Security,
                 title = "权限检查",
-                subtitle = if (permIssues > 0) "$permIssues 项待处理" else "可检测项均已开启",
+                subtitle = if (permIssues > 0) "$permIssues 项待处理" else if (settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR)
+                    "日历已授权 · 请确认手机日历通知" else if (reminderBackground.batteryOptimizationIgnored != true)
+                    "通知权限已就绪 · 请确认耗电管理" else "通知权限已就绪 · 请确认厂商后台设置",
                 tint = if (permIssues > 0) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.onSurface,
                 onClick = {
@@ -558,80 +833,23 @@ fun SettingsScreen(
                 choices = ThemeMode.entries.map { SettingsChoice(it.key, it.label) },
                 onSelect = { scope.launch { settingsRepo.save(themeMode = it) } }
             )
+
             SettingsDivider()
-            ThemeColorItem(
-                selected = ThemeColor.fromKey(settings.themeColor),
-                onSelect = { color -> scope.launch { settingsRepo.save(themeColor = color.key) } }
-            )
-            SettingsDivider()
-            SettingsChoiceItem(
-                id = "glass-effect",
-                icon = Icons.Filled.Palette,
-                title = "玻璃效果",
-                selectedKey = GlassEffect.fromKey(settings.glassEffect).key,
-                choices = GlassEffect.entries.map { SettingsChoice(it.key, it.label) },
-                onSelect = { scope.launch { settingsRepo.save(glassEffect = it) } }
-            )
-            SettingsDivider()
-            val wallpaperThumbnail = rememberWallpaperBitmap(settings.wallpaper)
             SettingItem(
                 icon = Icons.Filled.Palette,
-                title = "课表壁纸",
-                subtitle = if (settings.wallpaper == null) "未设置" else if (wallpaperThumbnail == null) "已设置 · 点此编辑或更换" else "已设置 · 所有课表共用",
-                onClick = { activeSubpage = SettingsSubpage.WALLPAPER },
-                trailing = {
-                    if (wallpaperThumbnail != null) WallpaperBackground(settings.wallpaper, wallpaperThumbnail,
-                        Modifier.size(42.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)))
-                    else ListItemChevron()
-                }
+                title = "外观设置",
+                subtitle = "${ThemeColor.fromKey(settings.themeColor).label} · ${GlassEffect.fromKey(settings.glassEffect).label} · " +
+                    if (settings.wallpaper == null) "未设置壁纸" else "已设置壁纸",
+                onClick = { activeSubpage = SettingsSubpage.APPEARANCE }
             )
         }
 
         SettingsGroup(title = "数据与安全") {
             SettingItem(
-                icon = Icons.Filled.IosShare,
-                title = "复制当前课表分享文本",
-                subtitle = "同学可通过「粘贴导入」校对后导入",
-                onClick = {
-                    scope.launch {
-                        try {
-                            val sharedCourses = courseRepo.byTimetableOnce(settings.timetableId)
-                            val text = withContext(Dispatchers.Default) {
-                                com.coursetable.app.importer.PasteTimetableImporter.share(sharedCourses, settings.timetableName)
-                            }
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("课表分享", text))
-                            toast("已复制当前课表，可发送给同学")
-                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                        catch (e: Exception) { toast(e.message ?: "分享失败，请重试") }
-                    }
-                }
-            )
-            SettingsDivider()
-            SettingItem(
                 icon = Icons.Filled.Save,
-                title = "导出备份文件",
-                subtitle = "JSON 格式，可用于恢复",
-                onClick = {
-                    exportBackup.launch("coursetable_backup_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.json")
-                }
-            )
-            SettingsDivider()
-            SettingItem(
-                icon = Icons.Filled.IosShare,
-                title = "导出 ICS 日历",
-                subtitle = "仅导出当前课表，可导入系统日历",
-                onClick = {
-                    exportIcs.launch("coursetable_${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.ics")
-                }
-            )
-            SettingsDivider()
-            SettingItem(
-                icon = Icons.Filled.DeleteForever,
-                title = "清空所有课程",
-                subtitle = "建议先导出备份",
-                tint = MaterialTheme.colorScheme.error,
-                onClick = { showClearConfirmDialog = true }
+                title = "备份与分享",
+                subtitle = "分享课表、导出备份与日历",
+                onClick = { activeSubpage = SettingsSubpage.DATA }
             )
         }
 
@@ -649,6 +867,109 @@ fun SettingsScreen(
     }
 
 
+}
+/** Keep the same full-window surface and scroll policy as existing settings pages. */
+@Composable
+private fun ReminderStatusPage(
+    status: ReminderStatus,
+    enabled: Boolean,
+    bottomContentPadding: androidx.compose.ui.unit.Dp,
+    onBack: () -> Unit
+) {
+    fun triggerLabel(millis: Long, courseName: String): String = buildString {
+        append(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm:ss", Locale.CHINA)
+            .withZone(java.time.ZoneId.systemDefault()).format(Instant.ofEpochMilli(millis)))
+        if (courseName.isNotBlank()) append("\n$courseName")
+    }
+
+    SettingsDetailPage(
+        title = "排程状态", tag = "reminder-status-page",
+        bottomContentPadding = bottomContentPadding, onBack = onBack
+    ) {
+        SettingsGroup(title = "排程概览") {
+            SettingItem(
+                icon = Icons.Filled.Notifications, title = "课前提醒",
+                subtitle = if (enabled) "已开启" else "已关闭"
+            )
+            SettingsDivider()
+            SettingItem(
+                icon = Icons.Filled.EventNote, title = "已排程提醒",
+                subtitle = if (!enabled) "提醒已关闭" else if (status.scheduledCount > 0)
+                    if (status.backend == ReminderBackend.SYSTEM_CALENDAR) "本学期后续共 ${status.scheduledCount} 个日历提醒"
+                    else "未来 7 天共 ${status.scheduledCount} 个提醒"
+                else "暂无待提醒课程"
+            )
+            SettingsDivider()
+            SettingItem(
+                icon = Icons.Filled.Schedule, title = "下次提醒",
+                subtitle = if (enabled && status.nextTriggerMillis > 0L)
+                    triggerLabel(status.nextTriggerMillis, status.nextCourseName) else "暂无待触发提醒"
+            )
+        }
+        if (status.lastError.isNotBlank()) {
+            SettingsGroup(title = "排程异常") {
+                SettingItem(
+                    icon = Icons.Filled.Info, title = "最近排程异常",
+                    subtitle = status.lastError, tint = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+        if (status.backend == ReminderBackend.SYSTEM_CALENDAR) {
+            SettingsGroup(title = "日历同步") {
+                SettingItem(icon = Icons.Filled.EventNote, title = "已同步课程日程",
+                    subtitle = "${status.calendarEventCount} 条；通知由手机日历发送，课程表无法自动读取送达结果。")
+            }
+        }
+        if (status.backend == ReminderBackend.APP && status.lastDelivery.isNotBlank()) {
+            SettingsGroup(title = "最近通知处理") {
+                SettingItem(
+                    icon = Icons.Filled.Notifications,
+                    title = "触发时间与提交结果",
+                    subtitle = status.lastDelivery
+                )
+            }
+        }
+        if (status.backend == ReminderBackend.APP) SettingsGroup(title = "触发日志") {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("保留最近 5 次触发记录，最新记录在前。触发记录不代表通知已送达。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (status.firedLog.isNotEmpty()) {
+                    status.firedLog.forEachIndexed { index, entry ->
+                        if (index > 0) HorizontalDivider()
+                        Text(entry, style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    Text(
+                        if (status.lastFiredMillis > 0L) triggerLabel(status.lastFiredMillis, status.lastFiredName)
+                        else "暂无触发记录",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsDetailPage(
+    title: String,
+    tag: String,
+    bottomContentPadding: androidx.compose.ui.unit.Dp,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    LiquidScrollablePage(Modifier.testTag(tag), topBar = { LiquidPageTopBar(title, onBack) }) { insets ->
+        val direction = LocalLayoutDirection.current
+        val padding = insets.pagePadding(extraBottom = bottomContentPadding)
+        Column(
+            Modifier.fillMaxSize().padding(top = insets.calculateTopPadding())
+                .testTag("$tag-scroll")
+                .verticalScroll(rememberPageScrollState())
+                .padding(start = padding.calculateStartPadding(direction), top = 16.dp,
+                    end = padding.calculateEndPadding(direction), bottom = padding.calculateBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) { content() }
+    }
 }
 /** 轻量分组：标题、留白和细边框共同建立层级。 */
 @Composable

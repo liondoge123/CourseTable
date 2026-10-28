@@ -1,6 +1,7 @@
 package com.coursetable.app
 
 import java.io.File
+import com.coursetable.app.data.AppSettings
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,7 +38,8 @@ class SecurityConfigurationTest {
         assertTrue(scheduler.contains("setExactAndAllowWhileIdle"))
         assertTrue(scheduler.contains("setAndAllowWhileIdle"))
         assertTrue(scheduler.contains("setWindow"))
-        assertFalse(scheduler.contains("setAlarmClock"))
+        // Ordinary reminders must stay the default; alarm-clock semantics require explicit opt-in.
+        assertFalse(AppSettings().reminderUseAlarmClock)
     }
 
     @Test

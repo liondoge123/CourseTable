@@ -12,10 +12,12 @@ import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.coursetable.app.MainActivity
 import com.coursetable.app.data.AppDatabase
 import com.coursetable.app.data.SettingsRepository
+import com.coursetable.app.data.ReminderBackend
 import com.coursetable.app.util.WeekUtils
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -25,9 +27,12 @@ import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** 排程状态快照，供设置页诊断展示 */
 data class ReminderStatus(
@@ -37,7 +42,15 @@ data class ReminderStatus(
     val lastFiredMillis: Long,
     val lastFiredName: String,
     val firedLog: List<String>,
-    val lastError: String = ""
+    val lastError: String = "",
+    val lastDelivery: String = "",
+    val testTriggerMillis: Long = 0L,
+    val testResult: String = "",
+    val testScheduleMode: String = "",
+    val backend: ReminderBackend = ReminderBackend.APP,
+    val calendarEventCount: Int = 0,
+    val calendarLastSyncMillis: Long = 0L,
+    val calendarTestTriggerMillis: Long = 0L
 )
 
 object ReminderScheduler {
@@ -56,8 +69,20 @@ object ReminderScheduler {
     private const val KEY_LAST_FIRED_NAME = "last_fired_name"
     private const val KEY_FIRED_KEYS = "fired_keys"
     private const val KEY_FIRED_LOG = "fired_log"
+    private const val KEY_LAST_DELIVERY = "last_delivery"
+    private const val KEY_TEST_TRIGGER = "test_trigger_millis"
+    private const val KEY_TEST_RESULT = "test_result"
+    private const val KEY_TEST_MODE = "test_schedule_mode"
+    private const val KEY_BACKEND = "reminder_backend"
+    private const val KEY_CALENDAR_COUNT = "calendar_event_count"
+    private const val KEY_CALENDAR_REMINDERS = "calendar_reminder_count"
+    private const val KEY_CALENDAR_TEST = "calendar_test_trigger"
+    private const val KEY_CALENDAR_LAST_SYNC = "calendar_last_sync"
+    internal const val EXTRA_TRIGGER_MILLIS = "triggerAtMillis"
+    private const val EXTRA_ALARM_MODE = "alarmMode"
     private const val REQUEST_REPLAN = 900000
     private const val REQUEST_TEST = 900001
+    private const val REQUEST_SHOW_ALARM = 900002
     private const val REQUEST_BASE = 2_000_000
     private const val REPLAN_HOUR = 0
     private const val REPLAN_MINUTE = 30
@@ -105,16 +130,37 @@ object ReminderScheduler {
     /** 读取上次排程的状态快照 */
     fun status(context: Context): ReminderStatus {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val backend = ReminderBackend.fromKey(prefs.getString(KEY_BACKEND, null))
         return ReminderStatus(
-            scheduledCount = prefs.getStringSet(KEY_SCHEDULED, emptySet()).orEmpty().size,
+            scheduledCount = if (backend == ReminderBackend.SYSTEM_CALENDAR) prefs.getInt(KEY_CALENDAR_REMINDERS, 0)
+                else prefs.getStringSet(KEY_SCHEDULED, emptySet()).orEmpty().size,
             nextTriggerMillis = prefs.getLong(KEY_NEXT_TRIGGER, 0L),
             nextCourseName = prefs.getString(KEY_NEXT_COURSE, "").orEmpty(),
             lastFiredMillis = prefs.getLong(KEY_LAST_FIRED, 0L),
             lastFiredName = prefs.getString(KEY_LAST_FIRED_NAME, "").orEmpty(),
             firedLog = prefs.getString(KEY_FIRED_LOG, "").orEmpty()
                 .split("\n").filter { it.isNotBlank() },
-            lastError = prefs.getString(KEY_LAST_ERROR, "").orEmpty()
+            lastError = prefs.getString(KEY_LAST_ERROR, "").orEmpty(),
+            lastDelivery = prefs.getString(KEY_LAST_DELIVERY, "").orEmpty(),
+            testTriggerMillis = prefs.getLong(KEY_TEST_TRIGGER, 0L),
+            testResult = prefs.getString(KEY_TEST_RESULT, "").orEmpty(),
+            testScheduleMode = prefs.getString(KEY_TEST_MODE, "").orEmpty(),
+            backend = backend,
+            calendarEventCount = prefs.getInt(KEY_CALENDAR_COUNT, 0),
+            calendarLastSyncMillis = prefs.getLong(KEY_CALENDAR_LAST_SYNC, 0L),
+            calendarTestTriggerMillis = prefs.getLong(KEY_CALENDAR_TEST, 0L)
         )
+    }
+
+    /** 排程或触发记录写入后，及时更新诊断页面。 */
+    fun observeStatus(context: Context) = callbackFlow {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            trySend(status(context))
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(status(context))
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     /**
@@ -148,36 +194,170 @@ object ReminderScheduler {
         return true
     }
 
-    /** 排一个 30 秒后的测试提醒，走正式提醒的完整链路 */
-    fun scheduleTest(context: Context) {
+    /** Persist the test identity before scheduling so a background result survives process death. */
+    @android.annotation.SuppressLint("ApplySharedPref")
+    fun scheduleTest(context: Context, useAlarmClock: Boolean = false): Boolean {
         val trigger = System.currentTimeMillis() + 30_000
-        setAlarm(context, REQUEST_TEST, trigger) {
-            putExtra("courseName", "测试课程")
-            putExtra("location", "测试教室")
-            putExtra("timeLabel", "测试")
-            putExtra("minutes", 0)
-            putExtra("isTest", true)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.edit().putLong(KEY_TEST_TRIGGER, trigger)
+                .remove(KEY_TEST_RESULT).remove(KEY_TEST_MODE).commit()) {
+            Log.e("ReminderScheduler", "Could not persist test reminder identity")
+            return false
+        }
+        return try {
+            val mode = setAlarm(context, REQUEST_TEST, trigger, useAlarmClock) {
+                putExtra("courseName", "测试课程")
+                putExtra("location", "测试教室")
+                putExtra("timeLabel", "测试")
+                putExtra("minutes", 0)
+                putExtra("isTest", true)
+            }
+            prefs.edit().putString(KEY_TEST_MODE, mode.label).commit()
+            true
+        } catch (e: Exception) {
+            Log.e("ReminderScheduler", "Test scheduling failed: ${e.javaClass.simpleName}")
+            prefs.edit().putString(KEY_TEST_RESULT, "测试提醒排程失败，请检查系统设置后重试").commit()
+            false
         }
     }
 
-    private suspend fun rescheduleInternal(context: Context) = rescheduleMutex.withLock {
+    // Store the observation before onReceive returns and the process becomes cached again.
+    @android.annotation.SuppressLint("ApplySharedPref")
+    internal fun recordDelivery(
+        context: Context, intent: Intent, receivedMillis: Long, outcome: ReminderNotificationOutcome
+    ) {
+        val planned = intent.getLongExtra(EXTRA_TRIGGER_MILLIS, 0L)
+        fun timeLabel(millis: Long) = java.time.Instant.ofEpochMilli(millis)
+            .atZone(ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss"))
+        val report = buildString {
+            append(intent.getStringExtra("courseName") ?: "课程")
+            if (planned > 0L) append(" · 计划 ").append(timeLabel(planned))
+            append(" · 触发 ").append(timeLabel(receivedMillis))
+            append(" · ").append(reminderTimingLabel(planned, receivedMillis))
+            append(" · ").append(reminderAlarmModeLabel(intent.getStringExtra(EXTRA_ALARM_MODE)))
+            append(" · ").append(outcome.label)
+        }
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit().putString(KEY_LAST_DELIVERY, report)
+        // A late broadcast from an older test must not overwrite a newer test's result.
+        if (intent.getBooleanExtra("isTest", false) && planned > 0L &&
+            prefs.getLong(KEY_TEST_TRIGGER, 0L) == planned) {
+            editor.putString(KEY_TEST_RESULT, report)
+        }
+        editor.commit()
+    }
+
+    /** Clean the previous backend before making the new choice effective. */
+    suspend fun configure(context: Context, enabled: Boolean? = null, backend: ReminderBackend? = null) =
+        withContext(Dispatchers.IO) {
+            val appContext = context.applicationContext
+            try {
+                rescheduleMutex.withLock {
+                    val repo = SettingsRepository(appContext, AppDatabase.get(appContext).timetableDao())
+                    val old = repo.settings.first()
+                    val next = backend ?: old.reminderBackend
+                    val nextEnabled = enabled ?: old.reminderEnabled
+                    if (nextEnabled && next == ReminderBackend.SYSTEM_CALENDAR &&
+                        !SystemCalendarReminders.hasPermissions(appContext)) throw CalendarAccessRequired()
+                    if (next == ReminderBackend.APP || !nextEnabled) SystemCalendarReminders.clear(appContext)
+                    if (next != old.reminderBackend || !nextEnabled) cancelAlarm(appContext, REQUEST_TEST)
+                    if (next == ReminderBackend.SYSTEM_CALENDAR) cancelAllInternal(appContext)
+                    repo.save(reminderEnabled = nextEnabled, reminderBackend = next)
+                    rescheduleLocked(appContext)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordFailure(appContext, e)
+                throw e
+            }
+        }
+
+    suspend fun rescheduleNow(context: Context) = withContext(Dispatchers.IO) {
+        try {
+            rescheduleInternal(context.applicationContext)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            recordFailure(context, e)
+            throw e
+        }
+    }
+
+    suspend fun scheduleCalendarTest(context: Context): Long = withContext(Dispatchers.IO) {
+        rescheduleMutex.withLock {
+            val trigger = SystemCalendarReminders.scheduleTest(context.applicationContext)
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_CALENDAR_TEST, trigger).apply()
+            trigger
+        }
+    }
+
+    /** A broadcast queued before switching backend must not send a duplicate app notification. */
+    internal fun receiveReminderAsync(context: Context, pending: BroadcastReceiver.PendingResult,
+                                      isTest: Boolean, deliver: () -> Unit) {
+        val appContext = context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                rescheduleMutex.withLock {
+                    val repo = SettingsRepository(appContext, AppDatabase.get(appContext).timetableDao())
+                    val settings = repo.settings.first()
+                    if (settings.reminderBackend == ReminderBackend.APP && (isTest || settings.reminderEnabled)) {
+                        SystemCalendarReminders.clear(appContext)
+                        deliver()
+                    }
+                    rescheduleLocked(appContext)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordFailure(appContext, e)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
+    private suspend fun rescheduleInternal(context: Context) = rescheduleMutex.withLock { rescheduleLocked(context) }
+
+    private suspend fun rescheduleLocked(context: Context) {
         cancelAllInternal(context)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_LAST_ERROR).apply()
 
         val db = AppDatabase.get(context)
         val settingsRepo = SettingsRepository(context, db.timetableDao())
-        val activeId = settingsRepo.activeTimetableId.first()
-        if (activeId <= 0) return@withLock
-        val timetable = db.timetableDao().byId(activeId) ?: return@withLock
-
         val settings = settingsRepo.settings.first()
-        if (!settings.reminderEnabled) return@withLock
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_BACKEND, settings.reminderBackend.key).apply()
+        if (!settings.reminderEnabled || settings.timetableId <= 0) {
+            SystemCalendarReminders.clear(context)
+            prefs.edit().putInt(KEY_CALENDAR_COUNT, 0).putInt(KEY_CALENDAR_REMINDERS, 0)
+                .remove(KEY_CALENDAR_TEST).remove(KEY_CALENDAR_LAST_SYNC).apply()
+            return
+        }
+        val activeId = settings.timetableId
+        val timetable = db.timetableDao().byId(activeId) ?: run {
+            SystemCalendarReminders.clear(context)
+            return
+        }
+        val courses = db.courseDao().byTimetableOnce(activeId)
+        if (settings.reminderBackend == ReminderBackend.SYSTEM_CALENDAR) {
+            val now = System.currentTimeMillis()
+            val result = SystemCalendarReminders.sync(context,
+                calendarOccurrences(settings, courses, java.time.Instant.ofEpochMilli(now)), now)
+            prefs.edit().putInt(KEY_CALENDAR_COUNT, result.eventCount)
+                .putInt(KEY_CALENDAR_REMINDERS, result.reminderCount)
+                .putLong(KEY_CALENDAR_LAST_SYNC, now)
+                .putLong(KEY_NEXT_TRIGGER, result.nextTriggerMillis).putString(KEY_NEXT_COURSE, result.nextCourse).apply()
+            return
+        }
+        SystemCalendarReminders.clear(context)
+        prefs.edit().putInt(KEY_CALENDAR_COUNT, 0).putInt(KEY_CALENDAR_REMINDERS, 0)
+            .remove(KEY_CALENDAR_TEST).remove(KEY_CALENDAR_LAST_SYNC).apply()
         // Keep maintenance alive even when this week has no courses.
         scheduleDailyReplan(context)
 
-        val courses = db.courseDao().byTimetableOnce(activeId)
         val periods = timetable.periods()
-        if (courses.isEmpty() || periods.isEmpty()) return@withLock
+        if (courses.isEmpty() || periods.isEmpty()) return
 
         val now = LocalDateTime.now()
         val today = LocalDate.now()
@@ -223,7 +403,7 @@ object ReminderScheduler {
         check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putStringSet(KEY_SCHEDULED, scheduled).commit()) { "Could not persist alarm identities" }
         for ((requestCode, millis, extras) in plans) {
-            setAlarm(context, requestCode, millis) { putExtras(extras) }
+            setAlarm(context, requestCode, millis, settings.reminderUseAlarmClock) { putExtras(extras) }
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -238,27 +418,45 @@ object ReminderScheduler {
         context: Context,
         requestCode: Int,
         triggerAtMillis: Long,
+        useAlarmClock: Boolean = false,
         crossinline fillIntent: Intent.() -> Unit
-    ) {
+    ): ReminderAlarmMode {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_REMIND
             fillIntent()
+            putExtra(EXTRA_TRIGGER_MILLIS, triggerAtMillis)
         }
-        val pi = PendingIntent.getBroadcast(
-            context, requestCode, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val exactMode = if (useAlarmClock) ReminderAlarmMode.ALARM_CLOCK else ReminderAlarmMode.EXACT
+        return registerReminderAlarm(
+            exactAllowed = canScheduleExactAlarms(context),
+            scheduleExact = {
+                val pi = reminderPendingIntent(context, requestCode, intent, exactMode)
+                if (useAlarmClock) {
+                    val showIntent = PendingIntent.getActivity(
+                        context, REQUEST_SHOW_ALARM,
+                        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent), pi)
+                } else {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
+                }
+            },
+            scheduleInexact = { mode ->
+                val pi = reminderPendingIntent(context, requestCode, intent, mode)
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
+            },
+            exactMode = exactMode
         )
-        if (canScheduleExactAlarms(context)) {
-            try {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
-                return
-            } catch (_: SecurityException) {
-                // Permission may be revoked between the capability check and scheduling.
-            }
-        }
-        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
     }
+
+    private fun reminderPendingIntent(
+        context: Context, requestCode: Int, intent: Intent, mode: ReminderAlarmMode
+    ): PendingIntent = PendingIntent.getBroadcast(
+        context, requestCode, intent.putExtra(EXTRA_ALARM_MODE, mode.name),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     /** 每日重排闹钟，保证长期未打开 App 时提醒也能持续 */
     fun scheduleDailyReplan(context: Context) {
@@ -292,7 +490,8 @@ object ReminderScheduler {
         val kind = error.javaClass.simpleName
         Log.e("ReminderScheduler", "Reminder scheduling failed: $kind")
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_LAST_ERROR, "提醒排程失败，请关闭后重新开启提醒").apply()
+            .putString(KEY_LAST_ERROR, if (error is CalendarAccessRequired) "请允许日历读写权限，以同步或清理课程提醒"
+                else "提醒排程或日历同步失败，请到提醒方式中重试").apply()
     }
 
     suspend fun cancelAll(context: Context) = rescheduleMutex.withLock { cancelAllInternal(context) }
@@ -356,10 +555,11 @@ object ReminderScheduler {
     }
 
     fun canPostNotifications(context: Context): Boolean {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        return NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED)
     }
 
     fun canScheduleExactAlarms(context: Context): Boolean {
@@ -382,7 +582,7 @@ object ReminderScheduler {
         }
     }
 
-    private fun openAppDetails(context: Context) {
+    fun openAppDetails(context: Context) {
         try {
             context.startActivity(
                 Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -391,6 +591,15 @@ object ReminderScheduler {
                 }
             )
         } catch (_: Exception) {
+        }
+    }
+
+    fun openBatteryOptimizationSettings(context: Context) {
+        try {
+            context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+            openAppDetails(context)
         }
     }
 
@@ -485,18 +694,25 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ReminderScheduler.ACTION_REMIND -> {
+                val receivedMillis = System.currentTimeMillis()
                 val isTest = intent.getBooleanExtra("isTest", false)
                 val name = if (isTest) "测试提醒"
                 else intent.getStringExtra("courseName") ?: "课程"
 
                 // 触发幂等：同一课程同一天只发一次通知（测试提醒每次唯一）
-                val firedKey = if (isTest) "test@${System.currentTimeMillis()}"
-                else "${intent.getLongExtra("courseId", 0L)}@${intent.getLongExtra("epochDay", 0L)}"
-                val shouldNotify = ReminderScheduler.claimFired(context, firedKey, name)
-                if (shouldNotify) {
-                    postNotification(context, intent)
+                ReminderScheduler.receiveReminderAsync(context, goAsync(), isTest) {
+                    val firedKey = if (isTest) "test@$receivedMillis"
+                    else "${intent.getLongExtra("courseId", 0L)}@${intent.getLongExtra("epochDay", 0L)}"
+                    if (ReminderScheduler.claimFired(context, firedKey, name)) {
+                        val outcome = try {
+                            postNotification(context, intent)
+                        } catch (e: Exception) {
+                            Log.e("ReminderReceiver", "Notification failed: ${e.javaClass.simpleName}")
+                            ReminderNotificationOutcome.FAILED
+                        }
+                        ReminderScheduler.recordDelivery(context, intent, receivedMillis, outcome)
+                    }
                 }
-                ReminderScheduler.rescheduleAsync(context, goAsync())
             }
             ReminderScheduler.ACTION_REPLAN -> {
                 ReminderScheduler.rescheduleAsync(context, goAsync())
@@ -504,9 +720,13 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun postNotification(context: Context, intent: Intent) {
-        if (!ReminderScheduler.canPostNotifications(context)) return
+    private fun postNotification(context: Context, intent: Intent): ReminderNotificationOutcome {
+        if (!ReminderScheduler.canPostNotifications(context)) return ReminderNotificationOutcome.APP_BLOCKED
         ReminderScheduler.ensureChannel(context)
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(ReminderScheduler.CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE) {
+            return ReminderNotificationOutcome.CHANNEL_BLOCKED
+        }
 
         val isTest = intent.getBooleanExtra("isTest", false)
         val name = intent.getStringExtra("courseName") ?: "课程"
@@ -514,9 +734,9 @@ class ReminderReceiver : BroadcastReceiver() {
         val timeLabel = intent.getStringExtra("timeLabel").orEmpty()
         val minutes = intent.getIntExtra("minutes", 15)
 
-        val title = if (isTest) "提醒测试成功" else "$minutes 分钟后上课：$name"
+        val title = if (isTest) "测试提醒已触发" else "$minutes 分钟后上课：$name"
         val content = if (isTest) {
-            "提醒链路正常，正式提醒将按时送达"
+            "请确认本次后台提醒是否按时显示，测试结果可在权限检查中查看"
         } else buildString {
             append(timeLabel)
             if (location.isNotBlank()) append(" · ").append(location)
@@ -544,18 +764,28 @@ class ReminderReceiver : BroadcastReceiver() {
             .setVibrate(longArrayOf(0, 300, 150, 300))
             .build()
 
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify((System.currentTimeMillis() and 0x0FFFFFFF).toInt(), notification)
+        return ReminderNotificationOutcome.SUBMITTED
     }
 }
 
-/** 开机或重新授予精确闹钟权限后重排提醒 */
+/** System events that invalidate or require restoring the stored alarm plan. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
-        ) {
+        if (intent.action in RECOVERY_ACTIONS) {
             ReminderScheduler.rescheduleAsync(context, goAsync())
+        }
+    }
+
+    companion object {
+        internal val RECOVERY_ACTIONS = buildSet {
+            add(Intent.ACTION_BOOT_COMPLETED)
+            add(Intent.ACTION_MY_PACKAGE_REPLACED)
+            add(Intent.ACTION_TIME_CHANGED)
+            add(Intent.ACTION_TIMEZONE_CHANGED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED)
+            }
         }
     }
 }
