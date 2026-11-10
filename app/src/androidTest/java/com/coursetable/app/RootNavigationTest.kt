@@ -206,8 +206,9 @@ class RootNavigationTest {
         }
         composeRule.onNodeWithTag("about-page").assertIsDisplayed()
         composeRule.onNodeWithText("关于 CourseTable").assertIsDisplayed()
-        composeRule.onNodeWithText("Apache License 2.0").assertIsDisplayed()
-        composeRule.onNodeWithText("免责与责任限制声明").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("检查更新").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Apache License 2.0").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("免责与责任限制声明").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("返回").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithTag("about-page").fetchSemanticsNodes().isEmpty()

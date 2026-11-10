@@ -857,7 +857,7 @@ fun SettingsScreen(
             SettingItem(
                 icon = Icons.Filled.Info,
                 title = "关于 CourseTable",
-                subtitle = "v$appVersionName · 开源协议与项目信息",
+                subtitle = "v$appVersionName · 项目与更新",
                 onClick = { activeSubpage = SettingsSubpage.ABOUT }
             )
         }
