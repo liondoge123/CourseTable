@@ -9,13 +9,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -32,8 +33,6 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawPlainBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.vibrancy
 
 /** Insets belong to scroll content, so its viewport reaches the physical window edge. */
 @Composable
@@ -47,11 +46,20 @@ internal fun LiquidScrollablePage(
     content: @Composable (PaddingValues) -> Unit
 ) {
     val backdrop = rememberLayerBackdrop()
+    val statusBackdrop = rememberLayerBackdrop()
     val chromeBackdrop = rememberLayerBackdrop()
     val insets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     val safe = insets.asPaddingValues()
     val direction = LocalLayoutDirection.current
     val density = LocalDensity.current
+    val capability = LocalGlassCapability.current
+    val blurRadius = with(density) { 18.dp.toPx() }
+    val statusBlur = remember(blurRadius) { BlurEffect(blurRadius, blurRadius, TileMode.Mirror) }
+    SideEffect {
+        // Blur the full scene before cropping. Mirror real scene pixels at window
+        // edges instead of mixing a theme-coloured overscan into the status bar.
+        statusBackdrop.graphicsLayer.renderEffect = if (capability != GlassCapability.STATIC) statusBlur else null
+    }
     var barHeight by remember { mutableStateOf(64.dp) }
     val topHeight = safe.calculateTopPadding() + if (topBar == null) 0.dp else barHeight
     val statusHeight = WindowInsets.statusBars.getTop(density).let { with(density) { it.toDp() } }
@@ -65,7 +73,7 @@ internal fun LiquidScrollablePage(
     CompositionLocalProvider(LocalTopChromeGlassBackdrop provides if (floatingTopBar) backdrop else chromeBackdrop) {
         Box(modifier.fillMaxSize().clipToBounds()) {
             // This recorder excludes both the fading material and the controls above it.
-            Box(Modifier.fillMaxSize().layerBackdrop(backdrop).consumeWindowInsets(insets)) {
+            Box(Modifier.fillMaxSize().layerBackdrop(backdrop).layerBackdrop(statusBackdrop).consumeWindowInsets(insets)) {
                 // Background-only source for glass controls excludes the controls themselves.
                 val backgroundBackdrop = rememberLayerBackdrop()
                 CompositionLocalProvider(LocalGlassBackdrop provides backgroundBackdrop) {
@@ -96,7 +104,7 @@ internal fun LiquidScrollablePage(
                     }.padding(topBarPadding)) { topBar() }
                 }
             }
-            if (statusHeight > 0.dp) LiquidTopEdge(backdrop, statusHeight, wallpaperVisible)
+            if (statusHeight > 0.dp) LiquidTopEdge(statusBackdrop, statusHeight)
             if (wallpaperVisible) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
                 .background(LiquidTheme.colorScheme.background.copy(alpha = .85f)))
@@ -122,44 +130,23 @@ internal fun PaddingValues.pagePadding(
 
 /** Blur and its fade are confined to the system status bar, never the app's header. */
 @Composable
-private fun LiquidTopEdge(backdrop: LayerBackdrop, statusHeight: Dp, wallpaperVisible: Boolean = false) {
-    val colors = LiquidTheme.colorScheme
+private fun LiquidTopEdge(backdrop: LayerBackdrop, statusHeight: Dp) {
     val capability = LocalGlassCapability.current
     val fadeHeight = minOf(16.dp, statusHeight)
     val fraction = ((statusHeight - fadeHeight) / statusHeight).coerceIn(0f, .99f)
     val material = if (capability != GlassCapability.STATIC) Modifier.drawPlainBackdrop(
         backdrop = backdrop,
         shape = { RectangleShape },
-        // Sample beyond the visible strip. Clamping to its first/last row would
-        // stretch a passing glyph into a large dark patch, then abruptly remove it.
-        effects = { blur(18.dp.toPx()); vibrancy(); padding = 36.dp.toPx() },
-        onDrawBackdrop = { drawBackdrop ->
-            // The source ends at the physical window edge. Fill the overscan first,
-            // so out-of-window samples stay opaque without repeating moving pixels.
-            val overscan = 36.dp.toPx()
-            drawRect(colors.background, topLeft = Offset(-overscan, -overscan), size = size)
-            drawBackdrop()
-        },
-        onDrawSurface = {
-            // Wallpaper already includes the user's mask. Only fade the sampled blur
-            // over it; an additional theme-colour surface would hide the image.
-            if (!wallpaperVisible) {
-                drawRect(colors.background.copy(alpha = if (colors.isDark) .18f else .22f))
-                drawRect(Brush.verticalGradient(listOf(
-                    Color.White.copy(alpha = if (colors.isDark) .025f else .08f), Color.Transparent
-                )))
-            }
-        }
-    ) else Modifier.drawWithContent {
-        if (!wallpaperVisible) drawRect(colors.background.copy(alpha = .94f))
-        drawContent()
-    }
+        // The source is already blurred at full-window bounds; only crop it here.
+        effects = {}
+    ) else Modifier
     Box(Modifier.fillMaxWidth().height(statusHeight)
         .testTag("liquid-top-edge")
         .clearAndSetSemantics { }
         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithContent {
             drawContent()
+            // White only supplies alpha for DstIn; it never tints the sampled scene.
             drawRect(Brush.verticalGradient(
                 0f to Color.White,
                 fraction to Color.White,

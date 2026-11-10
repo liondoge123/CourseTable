@@ -138,6 +138,26 @@ class LiquidScrollablePageTest {
         compose.onNodeWithContentDescription("下一周").assertIsDisplayed()
     }
 
+    @Test fun statusBlurPreservesSceneColourAtWindowEdges() {
+        org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 31)
+        val scene = Color(.15f, .35f, .65f)
+        show {
+            LiquidScrollablePage {
+                Canvas(Modifier.fillMaxSize()) { drawRect(scene) }
+            }
+        }
+        val pixels = compose.onRoot().captureToImage().toPixelMap()
+        val edge = compose.onNodeWithTag("liquid-top-edge", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        for (x in listOf(1, pixels.width / 2, pixels.width - 2)) {
+            for (y in listOf(1, (edge.bottom / 2).toInt(), edge.bottom.toInt() - 1)) {
+                val actual = pixels[x, y]
+                assertEquals("Status blur tinted red at ($x, $y)", scene.red, actual.red, .03f)
+                assertEquals("Status blur tinted green at ($x, $y)", scene.green, actual.green, .03f)
+                assertEquals("Status blur tinted blue at ($x, $y)", scene.blue, actual.blue, .03f)
+            }
+        }
+    }
+
     @Test fun topMaterialDoesNotLeakSharpStripesAtTheWindowEdge() {
         org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT >= 31)
         var statusTop = 0
