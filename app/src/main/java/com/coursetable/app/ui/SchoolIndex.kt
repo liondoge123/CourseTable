@@ -1,5 +1,7 @@
 package com.coursetable.app.ui
 
+import android.os.Build
+
 internal data class LatinSection<T>(val letter: Char, val items: List<T>)
 
 /** Group by the first A–Z letter of [latinOf]. Names without a letter go under '#', after Z. */
@@ -31,8 +33,14 @@ internal fun <T> latinSectionStarts(sections: List<LatinSection<T>>): Map<Char, 
 }
 
 private val schoolTransliterator: android.icu.text.Transliterator? by lazy {
-    runCatching { android.icu.text.Transliterator.getInstance("Han-Latin/Names; Latin-ASCII") }.getOrNull()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        null
+    } else {
+        runCatching { android.icu.text.Transliterator.getInstance("Han-Latin/Names; Latin-ASCII") }.getOrNull()
+    }
 }
 
-internal fun schoolLatin(name: String): String =
-    schoolTransliterator?.transliterate(name) ?: name
+internal fun schoolLatin(name: String): String {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return name
+    return schoolTransliterator?.transliterate(name) ?: name
+}
