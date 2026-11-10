@@ -6,11 +6,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EduImportFailureTest {
-    @Test fun semesterAlwaysComesFromTimetableAndMissingParametersFail() {
+    @Test fun pageSelectionOverridesTheStartDateGuess() {
+        val july = LocalDate.of(2026, 7, 6)
         assertEquals(Semester("2026","3"),deriveSemester(LocalDate.of(2026,9,1)))
         assertEquals(Semester("2025","12"),deriveSemester(LocalDate.of(2026,2,23)))
+        assertEquals(Semester("2025","12"),deriveSemester(july))
+        assertEquals(Semester("2024","3"),resolveImportSemester("2024\t3", july))
+        assertEquals(Semester("2024","12"),resolveImportSemester("2024\t12", july))
+        assertEquals(Semester("2024","16"),resolveImportSemester("2024\t16", july))
+        assertEquals(Semester("2024","1"),resolveImportSemester("2024\t1", july))
+        assertEquals(Semester("2025","12"),resolveImportSemester(null, july))
+        assertEquals(Semester("2025","12"),resolveImportSemester("", july))
+        assertEquals(Semester("2025","12"),resolveImportSemester("2024\t", july))
+        assertEquals(Semester("2025","12"),resolveImportSemester("20\t3", july))
+        assertEquals(Semester("2025","12"),resolveImportSemester("2024\t0", july))
+        assertEquals(Semester("2025","12"),resolveImportSemester("2024\t3&xnm=1", july))
+        assertEquals("2026\t3", pageSemesterSelection("\"2026\\t3\""))
+        assertNull(pageSemesterSelection("null"))
+        assertNull(pageSemesterSelection("\"\""))
         assertEquals(Semester("2026","3"),EduImportFailure.requireSemester("2026","3"))
+        assertEquals(Semester("2026","1"),EduImportFailure.requireSemester("2026","1"))
         try { EduImportFailure.requireSemester(null,null); fail() }
+        catch(e: EduImportException) { assertEquals(EduFailureKind.SEMESTER,e.kind) }
+        try { EduImportFailure.requireSemester("2026","3&xnm=1"); fail() }
         catch(e: EduImportException) { assertEquals(EduFailureKind.SEMESTER,e.kind) }
     }
     @Test fun distinguishesExpiredLoginBadPasswordChangedApiAndServerFailure() {

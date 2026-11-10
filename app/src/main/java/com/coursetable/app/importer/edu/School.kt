@@ -50,6 +50,50 @@ fun deriveSemester(semesterStart: LocalDate): Semester {
     }
 }
 
+/** Read the year and term currently selected on a Zhengfang schedule page, including its frames. */
+internal const val PAGE_SEMESTER_SCRIPT = """
+(function() {
+  function selected(win, depth) {
+    var found = '';
+    try {
+      var doc = win.document;
+      var year = doc.getElementById('xnm');
+      var term = doc.getElementById('xqm');
+      var xnm = year && year.value ? String(year.value).replace(/^\s+|\s+$/g, '') : '';
+      var xqm = term && term.value ? String(term.value).replace(/^\s+|\s+$/g, '') : '';
+      if (xnm && xqm) return xnm + '\t' + xqm;
+    } catch (e) { return ''; }
+    if (depth <= 0) return found;
+    var frames;
+    try { frames = win.document.querySelectorAll('iframe,frame'); } catch (e) { return found; }
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        var inner = selected(frames[i].contentWindow, depth - 1);
+        if (inner) return inner;
+      } catch (e) {}
+    }
+    return found;
+  }
+  try { return selected(window, 4); } catch (e) { return ''; }
+})()
+"""
+
+/** Undo the JSON quoting applied by WebView.evaluateJavascript. */
+internal fun pageSemesterSelection(jsResult: String?): String? {
+    if (jsResult.isNullOrBlank() || jsResult == "null") return null
+    val text = runCatching { org.json.JSONArray("[$jsResult]").getString(0) }.getOrNull() ?: return null
+    return text.takeIf { it.isNotBlank() }
+}
+
+/** Prefer the schedule page selection. Guess from the timetable start date only when that selection is absent. */
+fun resolveImportSemester(pageSelection: String?, semesterStart: LocalDate): Semester {
+    val parts = pageSelection?.split('\t').orEmpty()
+    val xnm = parts.getOrNull(0)?.trim().orEmpty()
+    val xqm = parts.getOrNull(1)?.trim().orEmpty()
+    if (Regex("\\d{4}").matches(xnm) && Regex("[1-9]\\d{0,2}").matches(xqm)) return Semester(xnm, xqm)
+    return deriveSemester(semesterStart)
+}
+
 interface SchoolAdapter {
     val key: String
     val name: String
@@ -82,12 +126,4 @@ class UjsAdapter : SchoolAdapter {
         UjsClient.fetchSchedule(cookies, xnm, xqm)
 }
 
-val KNOWN_SCHOOLS: List<SchoolAdapter> = listOf(
-    UjsAdapter(),
-    // Public login addresses from university notices; authenticated imports still need school-specific verification.
-    ZfJwglxtAdapter(ZfJwglxtConfig("zisu", "浙江外国语学院", "https://portaljw.zisu.edu.cn", "/jwglxt")),
-    ZfJwglxtAdapter(ZfJwglxtConfig("gxu", "广西大学", "https://jwxt2018.gxu.edu.cn", "/jwglxt")),
-    ZfJwglxtAdapter(ZfJwglxtConfig("yau", "延安大学", "https://jwglxt.yau.edu.cn", "/jwglxt")),
-    ZfJwglxtAdapter(ZfJwglxtConfig("zjhzu", "湖州学院", "https://zfjw.zjhzu.edu.cn", "/jwglxt")),
-    ZfJwglxtAdapter(ZfJwglxtConfig("jju", "九江学院", "https://zhjw1.jju.edu.cn", "/jwglxt"))
-)
+val KNOWN_SCHOOLS: List<SchoolAdapter> = listOf(UjsAdapter()) + ZHENGFANG_SCHOOLS

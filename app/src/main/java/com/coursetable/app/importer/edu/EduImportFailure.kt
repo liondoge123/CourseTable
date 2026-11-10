@@ -9,10 +9,10 @@ class EduImportException(val kind: EduFailureKind) : IllegalStateException(kind.
 
 object EduImportFailure {
     fun requireSemester(xnm: String?, xqm: String?): Semester {
-        if (xnm == null || !Regex("\\d{4}").matches(xnm) || xqm !in listOf("3", "12", "16")) {
+        if (xnm == null || !Regex("\\d{4}").matches(xnm) || xqm == null || !Regex("[1-9]\\d{0,2}").matches(xqm)) {
             throw EduImportException(EduFailureKind.SEMESTER)
         }
-        return Semester(xnm, xqm!!)
+        return Semester(xnm, xqm)
     }
 
     /** Never surface response bodies: they may contain student information or authentication tokens. */
@@ -39,6 +39,6 @@ object EduImportFailure {
         EduFailureKind.INCOMPATIBLE -> "学校接口暂不兼容。可以复制教务课表后使用粘贴导入，或导入课表图片/PDF"
         EduFailureKind.NETWORK -> "无法连接教务系统，请检查网络或校园网连接后重试"
         EduFailureKind.SERVICE -> "教务系统暂时不可用，请稍后重试，也可使用粘贴导入"
-        EduFailureKind.SEMESTER -> "学期参数缺失或无效，请检查当前课表的学期开始日期"
+        EduFailureKind.SEMESTER -> "学年或学期无效。请在课表查询页重新选择，或检查当前课表的开学日期"
     }
 }
